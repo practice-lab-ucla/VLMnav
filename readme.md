@@ -85,7 +85,7 @@ Our code requires all above data to be in a `data` folder in the following forma
 │  │  │  │  │  │  ├── val_unseen/
 ```
 ## API Key
-To use the Gemini models like we have set up, paste an api key into the .env file for the variable called GEMINI_API_KEY. To use a different VLM, we define a VLM class in src.vlm.py that can be extended to implement any VLM
+To use the Gemini models like we have set up, paste an api key into the .env file for the variable called GEMINI_API_KEY. External contributors added support for the OpenAI API. To use a different VLM, we define a VLM class in src.vlm.py that can be extended to implement any VLM. If you implement others and are interested in sharing it, feel free to open a pull request.
    
 # 🚀 Trajectory Visualization
 
