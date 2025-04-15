@@ -11,6 +11,32 @@ from simWrapper import PolarAction
 from utils import *
 from vlm import *
 from pivot import PIVOT
+from scipy.spatial.transform import Rotation as R
+from rrt_star_call import plan_rrt_star, plot_rrt_result
+
+
+
+
+def get_agent_heading_angle(agent_quat):
+    """
+    Get the heading angle (in degrees) the agent is facing in global frame.
+    The heading is measured from the X-axis in the XZ plane (e.g., 0° = +X, 90° = +Z).
+    """
+    quat_xyzw = [agent_quat.x, agent_quat.y, agent_quat.z, agent_quat.w]
+    rot = R.from_quat(quat_xyzw)
+
+    # Agent forward in local frame is Z
+    forward_local = np.array([0, 0, 1])
+    forward_global = rot.apply(forward_local)
+
+    # Project to XZ plane
+    x, z = forward_global[0], forward_global[2]
+
+    # Compute heading angle (0 = +X, 90 = +Z)
+    angle_rad = np.arctan2(x, -z)  # Flip Z because forward is Z
+    angle_deg = np.degrees(angle_rad)
+
+    return angle_deg % 360
 
 
 class Agent:
@@ -43,6 +69,7 @@ class RandomAgent(Agent):
             'logging_data': {}, # to be logged in the txt file
             'images': {'color_sensor': obs['color_sensor']} # to be visualized in the GIF
         }
+        
         return agent_action, metadata
 
 
@@ -56,6 +83,26 @@ class VLMNavAgent(Agent):
     explore_threshold = 3
     voxel_ray_size = 60
     e_i_scaling = 0.8
+
+
+
+
+    @staticmethod
+    def normalize_scores(confident_scores):
+        """
+        Normalizes a list of confidence scores to ensure they sum exactly to 1.
+        """
+        total = sum(confident_scores)
+        
+        if total == 0:
+            return [1.0 / len(confident_scores)] * len(confident_scores)
+        
+        # Normalize scores
+        normalized_scores = [s / total for s in confident_scores]
+        normalized_scores = [round(n, 3) for n in normalized_scores]  # round to # ofdecimal places to avoid long numbers
+        
+        return normalized_scores
+
 
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -77,10 +124,50 @@ class VLMNavAgent(Agent):
 
     def step(self, obs: dict):
         agent_state: habitat_sim.AgentState = obs['agent_state']
+
+
+
+
+# ########################### print agent location ###############################
+#         print("📍 Agent Position:", agent_state.position)
+#         print("🧭 Agent Rotation:", agent_state.rotation)
+
+#         quat = agent_state.rotation  # This is a habitat_sim.geo.Quaternionf
+#         quat_xyzw = [quat.x, quat.y, quat.z, quat.w]
+#         r = R.from_quat(quat_xyzw)
+#         euler_deg = r.as_euler('xyz', degrees=True)
+#         print("🧭 Agent Rotation in euler degree:", euler_deg)
+
+
+#         x_start = agent_state.position[0] + 1 # X position in meters
+#         y_start = agent_state.position[2] + 1.5 # 
+#         start = (x_start, y_start)
+#         goal = (2.0, 2.5)
+#         map_path = "topdown_maps_single/occupancy_h2.1.npy"
+
+
+#         path, nodes, occupancy, start_goal = plan_rrt_star(start, goal, map_path)
+
+#         if not path:
+#             print("⚠️ No valid path found. Skipping plot.")
+#         else:
+#             plot_rrt_result(path, nodes, occupancy, start_goal, map_path)
+
+
+
         if self.step_ndx == 0:
             self.init_pos = agent_state.position
 
         agent_action, metadata = self._choose_action(obs)
+
+
+        confidence_score = metadata['step_metadata'].get('score')  # Default to 1.0 if missing
+        # Adjust action distance based on confidence score
+        agent_action = self._adjust_action_distance(agent_action, confidence_score)
+        # Print updated action details
+        print(f"Final Action Selected -> Distance: {agent_action.r}, Angle: {agent_action.theta}, Score: {confidence_score}")
+        print("")
+
         metadata['step_metadata'].update(self.cfg)
 
         if metadata['step_metadata']['action_number'] == 0:
@@ -98,6 +185,35 @@ class VLMNavAgent(Agent):
         self.step_ndx += 1
         return agent_action, metadata
     
+
+    
+    def _adjust_action_distance(self, agent_action, confidence_score):
+        """
+        Adjusts the action distance based on the VLM confidence score.
+        Ensures the adjusted distance does not exceed the max calibrated distance.
+        """
+        max_action_dist_calibration = self.cfg.get('max_action_dist_calibration')  # Default to 1.7 if not found
+
+
+        # If the agent is determined to stop, do nothing
+        if confidence_score is None:
+            print("Target Found")
+            return agent_action  
+        
+        adjusted_distance = agent_action.r * confidence_score
+        final_distance = min(adjusted_distance, max_action_dist_calibration)
+
+        print(f"[VLMNavAgent] Adjusted Distance: {adjusted_distance}, Clamped Distance: {final_distance}")
+
+        agent_action.r = final_distance  # Update action distance
+        return agent_action
+
+
+
+
+
+
+
     def get_spend(self):
         return self.actionVLM.get_spend() + self.stoppingVLM.get_spend()
 
@@ -156,6 +272,10 @@ class VLMNavAgent(Agent):
             'called_stopping': called_stop
         }
         return a_final, images, step_metadata, stopping_response
+    
+
+
+    
 
     def _preprocessing_module(self, obs: dict):
         """Excutes the navigability, action_proposer and projection submodules."""
@@ -182,20 +302,39 @@ class VLMNavAgent(Agent):
         else:
             a_initial = self._navigability(obs)
             a_final = self._action_proposer(a_initial, agent_state)
+        
 
         a_final_projected = self._projection(a_final, images, agent_state)
         images['voxel_map'] = self._generate_voxel(a_final_projected, agent_state=agent_state)
         return a_final_projected, images
 
+    # def _stopping_module(self, stopping_images: list[np.array], goal):
+    #     """Determines if the agent should stop."""
+    #     stopping_prompt = self._construct_prompt(goal, 'stopping')
+    #     stopping_response = self.stoppingVLM.call(stopping_images, stopping_prompt)
+    #     dct = self._eval_response(stopping_response)
+    #     if 'done' in dct and int(dct['done']) == 1:
+    #         return True, stopping_response
+        
+    #     return False, stopping_response
+
     def _stopping_module(self, stopping_images: list[np.array], goal):
-        """Determines if the agent should stop."""
+        """Determines if the agent should stop and prints confidence scores."""
         stopping_prompt = self._construct_prompt(goal, 'stopping')
         stopping_response = self.stoppingVLM.call(stopping_images, stopping_prompt)
         dct = self._eval_response(stopping_response)
-        if 'done' in dct and int(dct['done']) == 1:
-            return True, stopping_response
-        
+
+        if 'done' in dct and 'confident_score' in dct:
+            done = int(dct['done'])
+            confident_scores = dct['confident_score']
+            normalized_scores = VLMNavAgent.normalize_scores(confident_scores)  # Ensure scores sum to 1
+            
+            print(f"Stopping Decision: {done}, Confidence Scores for Stop and Not stop: {normalized_scores}")
+
+            return done == 1, stopping_response
+
         return False, stopping_response
+
 
     def _navigability(self, obs: dict):
         """Generates the set of navigability actions and updates the voxel map accordingly."""
@@ -231,6 +370,8 @@ class VLMNavAgent(Agent):
                 a_initial.append((r_i, theta_i))
 
         return a_initial
+    
+
 
     def _action_proposer(self, a_initial: list, agent_state: habitat_sim.AgentState):
         """Refines the initial set of actions, ensuring spacing and adding a bias towards exploration."""
@@ -260,6 +401,8 @@ class VLMNavAgent(Agent):
             score = (sum(np.all((topdown_map[grid_coords[1]-2:grid_coords[1]+2, grid_coords[0]] == self.explored_color), axis=-1)) + 
                     sum(np.all(topdown_map[grid_coords[1], grid_coords[0]-2:grid_coords[0]+2] == self.explored_color, axis=-1)))
             arrowData.append([clip_frac*mag, theta, score<3])
+
+            # print(f"2/3: {clip_frac}")
 
         arrowData.sort(key=lambda x: x[1])
         thetas = set()
@@ -320,7 +463,17 @@ class VLMNavAgent(Agent):
             return self._get_default_arrows()
         
         out.sort(key=lambda x: x[1])
-        return [(mag, theta) for mag, theta, _ in out]
+
+
+        ############### here the function is only filtering out the action NOT changing it##################
+        original_distance_dict = dict(a_initial)  
+        # Restore original distances before returning
+        return [(original_distance_dict.get(theta, mag), theta) for mag, theta, _ in out]
+
+    
+        # return [(mag, theta) for mag, theta, _ in out]
+
+
 
     def _projection(self, a_final: list, images: dict, agent_state: habitat_sim.AgentState):
         """
@@ -341,34 +494,58 @@ class VLMNavAgent(Agent):
             )
 
         return a_final_projected
+        
 
     def _prompting(self, goal, a_final: list, images: dict, step_metadata: dict):
         """
         Prompting component of VLMNav. Constructs the textual prompt and calls the action model.
-        Parses the response for the chosen action number.
+        Parses the response for the chosen action number and confidence scores.
         """
+
+# #############################################3 extract angle ################################################
+#         print("🧭 Candidate action angles (relative to agent's heading):")
+#         for idx, (_, theta_i) in enumerate(a_final):
+#             angle_deg = np.degrees(theta_i)
+#             print(f"  Action {idx + 1}: θ = {theta_i:.2f} rad / {angle_deg:.1f}°")
+
+
         prompt_type = 'action' if self.cfg['project'] else 'no_project'
         action_prompt = self._construct_prompt(goal, prompt_type, num_actions=len(a_final))
 
         prompt_images = [images['color_sensor']]
         if 'goal_image' in images:
             prompt_images.append(images['goal_image'])
-        
+
         response = self.actionVLM.call_chat(self.cfg['context_history'], prompt_images, action_prompt)
 
         logging_data = {}
         try:
             response_dict = self._eval_response(response)
             step_metadata['action_number'] = int(response_dict['action'])
+            step_metadata['score'] = float(response_dict.get('score', 0))  # Default to 0 if not provided
+
+            # print(f"the score i, {step_metadata['score']}")
+
+            step_metadata['confident_score'] = response_dict.get('confident_score', [])
+
+            # print(f"Chosen Action: {step_metadata['action_number']}, Confidence Score: {step_metadata['score']}, Confident Score: {step_metadata['confident_score']}")
+
+            norm = VLMNavAgent.normalize_scores(step_metadata['confident_score'])  
+            print(f"Chosen Action: {step_metadata['action_number']}, normalized score for all actions: {norm}")
+
+            
         except (IndexError, KeyError, TypeError, ValueError) as e:
             logging.error(f'Error parsing response {e}')
             step_metadata['success'] = 0
         finally:
             logging_data['ACTION_NUMBER'] = step_metadata.get('action_number')
+            logging_data['CONFIDENCE_SCORE'] = step_metadata.get('score')
+            logging_data['CONFIDENT_SCORE'] = step_metadata.get('confident_score')
             logging_data['PROMPT'] = action_prompt
             logging_data['RESPONSE'] = response
 
         return step_metadata, logging_data, response
+
 
     def _get_navigability_mask(self, rgb_image: np.array, depth_image: np.array, agent_state: habitat_sim.AgentState, sensor_state: habitat_sim.SixDOFPose):
         """
@@ -552,7 +729,16 @@ class VLMNavAgent(Agent):
         cv2.line(self.voxel_map, agent_coords, point, self.unexplored_color, self.voxel_ray_size)
 
         # Mark explored regions
+        
+        # print(f"2/3: {clip_frac},max: {clip_dist}")
+
+        # clip_frac = 10000.0
+        # clip_dist = 10000.0
+
         clipped = min(clip_frac * r, clip_dist)
+        
+        # clipped = 0
+
         local_coords = np.array([clipped * np.sin(theta), 0, -clipped * np.cos(theta)])
         global_coords = local_to_global(agent_state.position, agent_state.rotation, local_coords)
         point = self._global_to_grid(global_coords)
@@ -758,10 +944,76 @@ class ObjectNavAgent(VLMNavAgent):
 
     def _choose_action(self, obs: dict):
         agent_state = obs['agent_state']
+
+
+        ########################### print agent location ###############################
+        print("📍 Agent Position:", agent_state.position)
+        print("🧭 Agent Rotation:", agent_state.rotation)
+
+        yaw_deg = get_agent_heading_angle(agent_state.rotation)
+        print("🧭 Agent Rotation in euler degree:", yaw_deg)
+
+        ########################### RRT star here ###############################
+        x_start = agent_state.position[0] + 1 # X position in meters
+        y_start = agent_state.position[2] + 1.5 # 
+        start = (x_start, y_start)
+        goal = (2.0, 2.5)
+        map_path = "topdown_maps_single/occupancy_h2.1.npy"
+
+
+        path, nodes, occupancy, start_goal, reference_angle, reference_point = plan_rrt_star(start, goal, map_path)
+
+
+        if reference_angle is not None:
+            reference_angle_deg = np.degrees(reference_angle)
+            print('Reference angle from RRT* (degrees):', reference_angle_deg)
+        else:
+            print('⚠️ No reference angle from RRT* (path not found)')
+
+
+
+        if not path:
+            print("⚠️ No valid path found. Skipping plot.")
+        else:
+            plot_rrt_result(path, nodes, occupancy, start_goal, map_path, reference_point)
+        ####################################################
+
+
+
+
+
         goal = obs['goal']
 
         a_final, images, step_metadata, stopping_response = self._run_threads(obs, [obs['color_sensor']], goal)
         step_metadata['object'] = goal
+
+        ########################### Extract action angles ###############################
+        # print("🧭 Candidate action angles (relative to agent's heading):")
+        # for idx, (_, theta_i) in enumerate(a_final):
+        #     angle_deg = np.degrees(theta_i)
+        #     print(f"  Action {idx + 1}: θ = {theta_i:.2f} rad / {angle_deg:.1f}°")
+
+
+        ########################### calculate the best option and print###############################
+
+        # yaw_deg = euler_deg[1]
+        # for idx, (_, theta_i) in enumerate(a_final):
+        #     angle_deg_relative = np.degrees(theta_i)
+        #     angle_deg_global = (angle_deg_relative + yaw_deg) 
+        #     print(f"  Action {idx + 1}: θ = {angle_deg_relative:.1f}° (relative), {angle_deg_global:.1f}° (global)")
+        ################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
 
         # If the model calls stop two times in a row, terminate the episode
         if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
@@ -789,32 +1041,152 @@ class ObjectNavAgent(VLMNavAgent):
             'a_final': a_final,
             'images': images
         }
+
+
+
+
+
+
+
+
+
+        if reference_angle is not None and 'confident_score' in step_metadata:
+            reference_angle_deg = np.degrees(reference_angle)
+            print(f"✅ RRT* Reference Global Angle: {reference_angle_deg:.1f}°")
+
+            # yaw_deg = euler_deg[1]
+            yaw_deg = get_agent_heading_angle(agent_state.rotation)
+
+            global_angles = []
+            for idx, (_, theta_i) in enumerate(a_final):
+                angle_deg_relative = np.degrees(theta_i)
+                angle_deg_global = (angle_deg_relative + yaw_deg) % 360
+                global_angles.append(angle_deg_global)
+                print(f"  Action {idx + 1}: θ = {angle_deg_relative:.1f}° (relative), {angle_deg_global:.1f}° (global)")
+
+            # Find the best matching angle
+            diffs = [abs((angle - reference_angle_deg + 180) % 360 - 180) for angle in global_angles]
+            best_action_idx = int(np.argmin(diffs))
+            closest_angle = global_angles[best_action_idx]
+
+            # Extract correct score
+            confident_scores = step_metadata.get('confident_score', [])
+            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+
+            score_idx = best_action_idx + 1 if turnaround_available else best_action_idx
+
+            # print('debug ############################',score_idx)
+
+            # print('debug ############################',len(confident_scores))
+
+
+
+
+            if 0 <= score_idx <= len(confident_scores):
+                confidence = confident_scores[score_idx]
+                print(f"🎯 Best VLM Option Matching RRT*: Action {best_action_idx + 1} (θ ≈ {closest_angle}°), Confidence: {confidence}")
+            else:
+                print("⚠️ Best matching index out of range of confidence scores.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         return agent_action, metadata
 
-    def _construct_prompt(self, goal: str, prompt_type:str, num_actions: int=0):
+    def _construct_prompt(self, goal: str, prompt_type: str, num_actions: int=0):
         if prompt_type == 'stopping':
-            stopping_prompt = (f"The agent has has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
-            f'Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note a chair is NOT sofa which is NOT a bed. '
-            f"First, tell me what you see in the image, and tell me if there is a {goal}. Second, return 1 if the agent is VERY CLOSE to the {goal} - make sure the object you see is ACTUALLY a {goal}, Return 0 if if there is no {goal}, or if it is far away, or if you are not sure. Format your answer in the json {{'done': <1 or 0>}}")
+            stopping_prompt = (f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
+                            f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
+                            f"First, describe what you see in the image and whether a {goal} is present. "
+                            f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
+                            f"Along with your decision, provide confidence scores for each of actions. The first score should be the score for the first action, and the second score should be the score for the second action."
+                            f"Format your response in JSON format: "
+                            f"{{'done': <1 or 0>, 'confident_score': [<confidence_for_stopping>, <confidence_for_not_stopping>]}}. "
+                            f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
+                            f"Normalize the values if necessary.")
             return stopping_prompt
+
+    
+
         if prompt_type == 'no_project':
             baseline_prompt = (f"TASK: NAVIGATE TO THE NEAREST {goal.upper()} and get as close to it as possible. Use your prior knowledge about where items are typically located within a home. "
                         "You have four possible actions: {0: Turn completely around, 1: Turn left, 2: Move straight ahead, 3: Turn right}. "
                         f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. Second, tell me which general direction you should go in. "
-                        f"Lastly, explain which action acheives that best, and return it as {{'action': <action_key>}}. Note you CANNOT GO THROUGH CLOSED DOORS, and you DO NOT NEED TO GO UP OR DOWN STAIRS"             
+                        f"Lastly, explain which action achieves that best, and return it as {{'action': <action_key>}}. Note you CANNOT GO THROUGH CLOSED DOORS, and you DO NOT NEED TO GO UP OR DOWN STAIRS"             
             )
             return baseline_prompt
         if prompt_type == 'pivot':
             pivot_prompt = f"NAVIGATE TO THE NEAREST {goal.upper()} and get as close to it as possible. Use your prior knowledge about where items are typically located within a home. "
             return pivot_prompt
         if prompt_type == 'action':
+            
+            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+
             action_prompt = (
-            f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. Use your prior knowledge about where items are typically located within a home. "
-            f"There are {num_actions - 1} red arrows superimposed onto your observation, which represent potential actions. " 
-            f"These are labeled with a number in a white circle, which represent the location you would move to if you took that action. {'NOTE: choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. ' if self.step_ndx - self.turned >= self.cfg['turn_around_cooldown'] else ''}"
-            f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. Second, tell me which general direction you should go in. "
-            f"Lastly, explain which action acheives that best, and return it as {{'action': <action_key>}}. Note you CANNOT GO THROUGH CLOSED DOORS, and you DO NOT NEED TO GO UP OR DOWN STAIRS"
+                f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
+                f"Use your prior knowledge about where items are typically located within a home. "
+                f"There are {num_actions} actions that you can choose from. "
+                f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
+                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. ' if turnaround_available else ''}"
+                f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
+                f"Second, tell me which general direction you should go in. "
+                f"Lastly, explain which action achieves that best and return it as JSON in the format: "
+                f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
+                f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
+                f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
+                f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
             )
             return action_prompt
 
         raise ValueError('Prompt type must be stopping, pivot, no_project, or action')
+
+                # f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list.' if turnaround_available else ''}"
+
+                # f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
+                # f"Use your prior knowledge about where items are typically located within a home. "
+                # f"There are {num_actions - 1} red arrows superimposed onto your observation, which represent potential actions. " 
+                # f"These are labeled with a number in a white circle, which represent the location you would move to if you took that action. "
+                # f"{'NOTE: choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. ' if self.step_ndx - self.turned >= self.cfg['turn_around_cooldown'] else ''}"
+                # f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
+                # f"Second, tell me which general direction you should go in. "
+                # f"Lastly, explain which action achieves that best and return it as JSON in the format: "
+                # f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_1>, <score_2>, ..., <score_n>]}}. "
+                # f"The 'score' must be exactly equal to the confidence value of the chosen action in 'confident_score'. "
+                # f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
+                # f"Normalize the values if necessary."
+
+
+                # f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
+                # f"Use your prior knowledge about where items are typically located within a home. "
+                # f"There are {num_actions} of actions that you can choose from"
+                # f"Actions with red arrows superimposed onto your observation, which represent potential actions. " 
+                # f"These are labeled with a number in a white circle, which represent the location you would move to if you took that action. "
+                # f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. ' if self.step_ndx - self.turned >= self.cfg['turn_around_cooldown'] else ''}"
+                # f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
+                # f"Second, tell me which general direction you should go in. "
+                # f"Lastly, explain which action achieves that best and return it as JSON in the format: "
+                # f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_1>, <score_2>, ..., <score_n>]}}. "
+                # f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
+                # f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
+                # f"Normalize the values if necessary."

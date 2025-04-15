@@ -4,9 +4,25 @@ import torch
 import numpy as np
 import google.generativeai as genai
 import cv2
+import openai
+import io
+import base64
+from dotenv import load_dotenv
+
 
 from PIL import Image
 from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation, pipeline
+
+
+
+load_dotenv()
+
+CHATGPT_HISTORY_ACCESS = int(os.getenv("CHATGPT_HISTORY_ACCESS", 0))  # Default to 0 (No history)
+
+
+api_key = os.environ.get("CHATGPT_API_KEY")
+if not api_key:
+    raise ValueError("❌ ERROR: CHATGPT_API_KEY is not set. Please check your .env file.")
 
 
 class VLM:
@@ -179,6 +195,168 @@ class GeminiVLM(VLM):
         Retrieve the total spend on model usage.
         """
         return self.spend
+
+
+
+
+
+
+
+class ChatGPTVLM(VLM):
+    """
+    A specific implementation of a VLM using OpenAI's ChatGPT API for text and image inference.
+    """
+
+    def __init__(self, model="gpt-4-vision-preview", system_instruction=None, max_history=5):
+        """
+        Initialize the ChatGPT model with specified configuration.
+
+        Parameters
+        ----------
+        model : str
+            The OpenAI model version to be used (must support vision for image input).
+        system_instruction : str, optional
+            System instructions for model behavior.
+        """
+        self.name = model
+        self.model = model
+        self.system_instruction = system_instruction or "You are an AI assistant that processes text and images."
+        self.spend = 0
+        self.client = openai.OpenAI(api_key=api_key)  # Define OpenAI client inside class
+        
+        # store history if = 1
+        self.history_enabled = CHATGPT_HISTORY_ACCESS == 1  # Enable history only if CHATGPT_HISTORY_ACCESS=1
+        self.max_history = max_history    
+        self.history = [] if self.history_enabled else None  # Store past interactions only if enabled
+    
+        if self.history_enabled:
+            print("🟢 History is enabled for ChatGPT")
+
+
+    
+    def _encode_image(self, image: np.array):
+        """
+        Converts an image (numpy array) into a base64 string for OpenAI API.
+
+        Parameters
+        ----------
+        image : np.array
+            An RGB image.
+
+        Returns
+        -------
+        str
+            A base64-encoded string of the image.
+        """
+        pil_image = Image.fromarray(image[:, :, :3])  # Convert to PIL Image
+        buffered = io.BytesIO()
+        pil_image.save(buffered, format="PNG")  # Save as PNG
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return img_str
+
+    def call(self, images: list[np.array], text_prompt: str):
+        """
+        Perform inference using OpenAI's ChatGPT model with optional history.
+
+        Parameters
+        ----------
+        images : list[np.array]
+            A list of RGB image arrays.
+        text_prompt : str
+            The text prompt to process.
+
+        Returns
+        -------
+        str
+            The response from ChatGPT.
+        """
+        # Supress unnecessary print
+        logging.getLogger("httpx").setLevel(logging.WARNING) 
+
+        try:
+            messages = [{"role": "system", "content": self.system_instruction}]
+
+            # Include history if enabled
+            if self.history_enabled and self.history:
+                messages += self.history  
+
+            user_message = {"role": "user", "content": text_prompt}
+            if images:
+                user_message["content"] = [{"type": "text", "text": text_prompt}]
+                user_message["content"] += [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{self._encode_image(img)}"}}
+                    for img in images
+                ]
+
+            messages.append(user_message)
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages
+            )
+
+            output = response.choices[0].message.content
+
+            # Update history only if enabled
+            if self.history_enabled:
+                self.history.append(user_message)
+                self.history.append({"role": "assistant", "content": output})
+
+                # Limit history length
+                if len(self.history) > 2 * self.max_history:
+                    self.history = self.history[-2 * self.max_history:]
+
+                # Print the current history length
+                print(f"Current History Length: {len(self.history)}")
+
+            return output
+
+        except Exception as e:
+            logging.error(f"❌ OpenAI API ERROR: {e}")
+            return "OpenAI API ERROR"
+
+
+    def call_chat(self, history: int, images: list[np.array], text_prompt: str):
+        """
+        Perform context-aware inference with OpenAI's ChatGPT model.
+
+        Parameters
+        ----------
+        history : int
+            The number of past steps to keep in context (ignored for now).
+        images : list[np.array]
+            A list of RGB image arrays.
+        text_prompt : str
+            The text prompt to process.
+
+        Returns
+        -------
+        str
+            The response from ChatGPT.
+        """
+        return self.call(images, text_prompt)
+
+    def get_spend(self):
+        """
+        Retrieve the total spend on model usage.
+        """
+        return self.spend
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class DepthEstimator:

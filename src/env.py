@@ -319,6 +319,9 @@ class GOATEnv(Env):
             logging.info(f'Goal {i}: {subgoal["name"]}, {subgoal["mode"]}')
 
         self.init_pos = np.array(episode['start_position'])
+
+
+
         self.simWrapper.set_state(pos=self.init_pos, quat=episode['start_rotation'])
         self.curr_goal_ndx = 0
         self.curr_run_name = f"{episode_ndx}_{self.simWrapper.scene_id}"
@@ -432,6 +435,13 @@ class ObjectNavEnv(Env):
 
         goals = self.goals[f[1][6:]]
         all_objects = goals[f'{f[-1]}_{episode["object_category"]}']
+
+############################################################################################################################
+        episode["object_category"] = 'bed'
+        # print('target')
+        print(f"target: {episode['object_category']}")
+############################################################################################################################
+
         view_positions = []
         for obj in all_objects:
             for vp in obj['view_points']:
@@ -447,7 +457,23 @@ class ObjectNavEnv(Env):
             'view_positions': view_positions
         }
         self.init_pos = np.array(episode['start_position'])
-        self.simWrapper.set_state(pos=self.init_pos, quat=episode['start_rotation'])
+
+        # self.init_pos = np.array([6.5, 2.06447, 3.25])
+        self.init_pos = np.array([9.5, 2.06447, 1])
+
+        rotation = episode['start_rotation']
+
+        # rotation = np.array([0, -0.73173, 0, -0.6816])
+
+
+        rotation = np.array([0.0, -0.76604444, 0.0, -0.64278761])   
+
+        print(f"Agent starts at position: {self.init_pos}")
+        print(f"Agent starts at orientation: {rotation}")
+
+
+##################################################################################################
+        self.simWrapper.set_state(pos=self.init_pos, quat=rotation)
         self.curr_run_name = f"{episode_ndx}_{self.simWrapper.scene_id}"
 
         obs = self.simWrapper.step(PolarAction.null)
