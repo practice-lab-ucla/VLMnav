@@ -5,3 +5,5 @@ logs/
 .vscode/
 wandb/
 src/VLMnav.egg-info/
+.env
+rrt_star_record/
