@@ -12,7 +12,8 @@ import numpy as np
 from rrt_star_call import plan_rrt_star, plot_rrt_result
 
 # Define start and goal in meters
-start = (8.699629 + 0.77397, 1.6323051 + 1.5698568)
+
+start = (1.0274764  + 0.77397, 1.4455771  + 1.5698568)
 goal = (2.0, 2.5)
 map_path = "topdown_maps_single/occupancy_h2.06.npy"
 

@@ -6,8 +6,8 @@ import cv2
 map_path = "topdown_maps_single/occupancy_h2.06.npy"
 # [6.5, 2.06447, 3.25]
 
-x_meters, y_meters = 8.699629  + 0.77397, 1.6323051 + 1.5698568  # Replace with the point you want to visualize
-meters_per_pixel = 0.05
+x_meters, y_meters = 1.0274764  + 0.77397, 1.4455771 + 1.5698568  # Replace with the point you want to visualize
+meters_per_pixel = 0.01
 
 # ---- Load map ----
 occupancy = np.load(map_path)
@@ -16,6 +16,10 @@ height, width = occupancy.shape
 # ---- Convert to pixel coordinates ----
 x_px = int(x_meters / meters_per_pixel)
 y_px = int(y_meters / meters_per_pixel)
+
+
+status = "occupied (obstacle)" if occupancy[y_px, x_px] == 1 else "free (navigable)"
+print(f"🧱 Grid cell at ({x_px}, {y_px}) is: {status}")
 
 # ---- Check bounds ----
 if not (0 <= x_px < width and 0 <= y_px < height):

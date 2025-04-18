@@ -18,9 +18,9 @@ class Node:
 # search_radius = 20
 
 
-meters_per_pixel = 0.05
+meters_per_pixel = 0.01
 max_iterations = 1000
-step_size = 0.3
+step_size = 0.1
 search_radius = 1
 robot_radius_m = 0.05  # radius of the robot in meters
 goal_tolerance = 1
