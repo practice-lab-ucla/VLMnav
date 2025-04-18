@@ -11,7 +11,7 @@ class Node:
         self.parent = None
         self.cost = 0.0
 
-def plan_rrt_star(start_m, goal_m, map_path, meters_per_pixel=0.05, step_size_m=0.3, search_radius_m=1, robot_radius_m=0.0, goal_tolerance_m=1, max_iterations=1000):
+def plan_rrt_star(start_m, goal_m, map_path, meters_per_pixel=0.05, step_size_m=0.2, search_radius_m=1, robot_radius_m=0.0, goal_tolerance_m=1, max_iterations=2000):
     # Convert parameters to pixel scale
     step_size = step_size_m / meters_per_pixel
     search_radius = search_radius_m / meters_per_pixel

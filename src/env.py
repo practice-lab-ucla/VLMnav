@@ -15,6 +15,7 @@ from PIL import Image
 from simWrapper import PolarAction, SimWrapper
 from agent import *
 from utils import *
+from generate_map_fh import extract_and_save_topdown_map
 
 class Env:
     """
@@ -461,6 +462,12 @@ class ObjectNavEnv(Env):
         # self.init_pos = np.array([6.5, 2.06447, 3.25])
         self.init_pos = np.array([9.5, 2.06447, 1])
 
+
+        
+        ##### save the height and will use in agent.py later #######
+        self.cfg['rrt_map_height'] = float(self.init_pos[1])
+        self.agent.cfg['rrt_map_height'] = self.cfg['rrt_map_height']
+
         rotation = episode['start_rotation']
 
         # rotation = np.array([0, -0.73173, 0, -0.6816])
@@ -470,6 +477,23 @@ class ObjectNavEnv(Env):
 
         print(f"Agent starts at position: {self.init_pos}")
         print(f"Agent starts at orientation: {rotation}")
+
+        ######################################### extract map #############################################
+        height = float(self.init_pos[1])  # agent's initial y-position
+        # scene_path = self.sim_cfg["scene_path"]
+
+        scene_path = "data/scene_datasets/hm3d/val/00877-4ok3usBNeis/4ok3usBNeis.basis.glb"
+        occupancy_map, map_origin = extract_and_save_topdown_map(scene_path, height=height)
+
+        self.cfg['map_origin'] = map_origin
+        self.agent.cfg['map_origin'] = self.cfg['map_origin']
+
+        print(f"✅ In env.py, map generated at height {height:.2f} from scene: {scene_path}")
+
+
+
+
+
 
 
 ##################################################################################################

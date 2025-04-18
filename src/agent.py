@@ -161,7 +161,10 @@ class VLMNavAgent(Agent):
         agent_action, metadata = self._choose_action(obs)
 
 
-        confidence_score = metadata['step_metadata'].get('score')  # Default to 1.0 if missing
+        confidence_score = metadata['step_metadata'].get('score') 
+
+
+
         # Adjust action distance based on confidence score
         agent_action = self._adjust_action_distance(agent_action, confidence_score)
         # Print updated action details
@@ -203,7 +206,7 @@ class VLMNavAgent(Agent):
         adjusted_distance = agent_action.r * confidence_score
         final_distance = min(adjusted_distance, max_action_dist_calibration)
 
-        print(f"[VLMNavAgent] Adjusted Distance: {adjusted_distance}, Clamped Distance: {final_distance}")
+        print(f"[VLMNavAgent] Original distance: {agent_action.r}, Adjusted distance: {final_distance}")
 
         agent_action.r = final_distance  # Update action distance
         return agent_action
@@ -954,11 +957,39 @@ class ObjectNavAgent(VLMNavAgent):
         print("🧭 Agent Rotation in euler degree:", yaw_deg)
 
         ########################### RRT star here ###############################
-        x_start = agent_state.position[0] + 1 # X position in meters
-        y_start = agent_state.position[2] + 1.5 # 
+        map_origin = self.cfg.get('map_origin')
+
+
+        # print(f"printing map_origin {map_origin}")
+
+        x_start = agent_state.position[0] - map_origin[0] # X position in meters
+        y_start = agent_state.position[2] - map_origin[1]  # 
+
+        # x_start = agent_state.position[0] + 0.77397 # X position in meters
+        # y_start = agent_state.position[2] + 1.5698568 # 
+
+
         start = (x_start, y_start)
         goal = (2.0, 2.5)
-        map_path = "topdown_maps_single/occupancy_h2.1.npy"
+
+
+
+
+        # map_path = "topdown_maps_single/occupancy_h2.1.npy"
+
+
+
+
+        height = self.cfg.get('rrt_map_height')
+
+
+
+        # print(f"printing in agent.py {self.cfg['rrt_map_height']:.2f}")
+
+        
+        map_path = f"topdown_maps_single/occupancy_h{height:.2f}.npy"
+
+
 
 
         path, nodes, occupancy, start_goal, reference_angle, reference_point = plan_rrt_star(start, goal, map_path)
@@ -1073,7 +1104,11 @@ class ObjectNavAgent(VLMNavAgent):
             confident_scores = step_metadata.get('confident_score', [])
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
-            score_idx = best_action_idx + 1 if turnaround_available else best_action_idx
+            # score_idx = best_action_idx + 1 if turnaround_available else best_action_idx
+
+
+
+            score_idx = best_action_idx
 
             # print('debug ############################',score_idx)
 
@@ -1082,7 +1117,7 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-            if 0 <= score_idx <= len(confident_scores):
+            if 0 <= score_idx < len(confident_scores):
                 confidence = confident_scores[score_idx]
                 print(f"🎯 Best VLM Option Matching RRT*: Action {best_action_idx + 1} (θ ≈ {closest_angle}°), Confidence: {confidence}")
             else:
@@ -1153,6 +1188,7 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Second, tell me which general direction you should go in. "
                 f"Lastly, explain which action achieves that best and return it as JSON in the format: "
                 f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
+                f"'action' must be an integer not a string. "
                 f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
                 f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
                 f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
