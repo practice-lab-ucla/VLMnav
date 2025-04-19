@@ -304,10 +304,21 @@ class VLMNavAgent(Agent):
             ]
         else:
             a_initial = self._navigability(obs)
+
+            # print(f"debug here ################################### 1",a_initial)
+
+
             a_final = self._action_proposer(a_initial, agent_state)
+
+
+            # print(f"debug here ################################### 2",a_final)
         
 
         a_final_projected = self._projection(a_final, images, agent_state)
+
+
+        # print(f"debug here ################################### 3",a_final_projected)
+
         images['voxel_map'] = self._generate_voxel(a_final_projected, agent_state=agent_state)
         return a_final_projected, images
 
@@ -379,6 +390,10 @@ class VLMNavAgent(Agent):
     def _action_proposer(self, a_initial: list, agent_state: habitat_sim.AgentState):
         """Refines the initial set of actions, ensuring spacing and adding a bias towards exploration."""
         min_angle = self.fov/self.cfg['spacing_ratio']
+
+        print(f"debug here hhhhhhhhhhhhhhhhhhhhhhhhhhhh",min_angle )
+
+
         explore_bias = self.cfg['explore_bias']
         clip_frac = self.cfg['clip_frac']
         clip_mag = self.cfg['max_action_dist']
@@ -428,7 +443,10 @@ class VLMNavAgent(Agent):
                 out.append([min(longest[0], clip_mag), longest[1], longest[2]])
                 thetas.add(longest[1])
                 for i in range(longest_ndx+1, len(f)):
-                    if f[i][1] - longest_theta > (min_angle*0.9):
+                    if all(abs(f[i][1] - t) > (min_angle * 0.9) for t in thetas):
+
+
+                        ############################################################### make it consider all ###########3
                         out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
                         thetas.add(f[i][1])
                         longest_theta = f[i][1]
