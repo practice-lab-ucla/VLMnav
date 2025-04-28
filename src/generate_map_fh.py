@@ -58,8 +58,8 @@ def extract_and_save_topdown_map(scene_path, height=2.1, meters_per_pixel=0.01, 
     print(f"✅ Saved occupancy grid: {npy_filename}")
 
     # Save origin
-    origin_filename = f"{output_dir}/origin_h{height:.2f}.npy"
-    np.save(origin_filename, origin_xz)
+    # origin_filename = f"{output_dir}/origin_h{height:.2f}.npy"
+    # np.save(origin_filename, origin_xz)
     # print(f"✅ Saved origin: {origin_filename}")
 
     # Save visual preview
