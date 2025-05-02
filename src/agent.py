@@ -391,6 +391,8 @@ class VLMNavAgent(Agent):
         """Refines the initial set of actions, ensuring spacing and adding a bias towards exploration."""
         min_angle = self.fov/self.cfg['spacing_ratio']
 
+
+        # min_angle = 1
         print(f"debug here hhhhhhhhhhhhhhhhhhhhhhhhhhhh",min_angle )
 
 
@@ -442,26 +444,43 @@ class VLMNavAgent(Agent):
             
                 out.append([min(longest[0], clip_mag), longest[1], longest[2]])
                 thetas.add(longest[1])
-                for i in range(longest_ndx+1, len(f)):
-                    if all(abs(f[i][1] - t) > (min_angle * 0.9) for t in thetas):
-
-
-                        ############################################################### make it consider all ###########3
-                        out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
-                        thetas.add(f[i][1])
-                        longest_theta = f[i][1]
-                for i in range(longest_ndx-1, -1, -1):
-                    if smallest_theta - f[i][1] > (min_angle*0.9):
+                # for i in range(longest_ndx+1, len(f)):
+                #     if f[i][1] - longest_theta > (min_angle*0.9):
+                #         out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
+                #         thetas.add(f[i][1])
+                #         longest_theta = f[i][1]
+                # for i in range(longest_ndx-1, -1, -1):
+                #     if smallest_theta - f[i][1] > (min_angle*0.9):
                         
+                #         out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
+                #         thetas.add(f[i][1])
+                #         smallest_theta = f[i][1]
+
+                for i in range(longest_ndx + 1, len(f)):
+                    if all(abs(f[i][1] - t) > (min_angle * 0.9) for t in thetas):
                         out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
                         thetas.add(f[i][1])
-                        smallest_theta = f[i][1]
 
+                for i in range(longest_ndx - 1, -1, -1):
+                    if all(abs(f[i][1] - t) > (min_angle * 0.9) for t in thetas):
+                        out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
+                        thetas.add(f[i][1])
+
+
+
+
+                # print(thetas)
                 for r_i, theta_i, e_i in filtered:
+
+                    # print(theta_i)
+
                     if theta_i not in thetas and min([abs(theta_i - t) for t in thetas]) > min_angle*explore_bias:
                         out.append((min(r_i, clip_mag), theta_i, e_i))
                         thetas.add(theta)
 
+                # print("#######################################")
+                # print(thetas)
+    
         if len(out) == 0:
             # if no explored actions or no explore bias
             longest = max(filtered, key=lambda x: x[0])
@@ -1125,8 +1144,19 @@ class ObjectNavAgent(VLMNavAgent):
             # score_idx = best_action_idx + 1 if turnaround_available else best_action_idx
 
 
+            num_actions = len(a_final)
 
-            score_idx = best_action_idx
+            if turnaround_available:
+                # Map visual action index → score index
+                if best_action_idx == num_actions - 1:  # turnaround action (last in a_final)
+                    score_idx = 0
+                else:
+                    score_idx = best_action_idx + 1
+            else:
+                score_idx = best_action_idx
+
+
+            # score_idx = best_action_idx
 
             # print('debug ############################',score_idx)
 
