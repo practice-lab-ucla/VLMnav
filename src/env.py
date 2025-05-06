@@ -53,6 +53,11 @@ class Env:
         agent_cls = globals()[cfg['agent_cls']]
         self.agent: Agent = agent_cls(cfg['agent_cfg']) 
 
+
+
+
+
+
     def _initialize_logging(self, cfg: dict):
         """
         Initializes logging for the environment.
@@ -357,6 +362,9 @@ class GOATEnv(Env):
 
         agent_state = obs['agent_state']
         agent_action, metadata = self.agent.step(obs)
+
+
+
         step_metadata = metadata['step_metadata']
         logging_data = metadata['logging_data']
         images = metadata['images']
@@ -433,6 +441,7 @@ class ObjectNavEnv(Env):
         self.sim_cfg['scene_id'] = f[1][2:5]
         self.sim_cfg['scene_path'] = f'data/scene_datasets/hm3d/{self.cfg["split"]}/{f[1]}/{f[2]}'
         self.simWrapper = SimWrapper(self.sim_cfg)
+        self.agent.simWrapper = self.simWrapper
 
         goals = self.goals[f[1][6:]]
         all_objects = goals[f'{f[-1]}_{episode["object_category"]}']

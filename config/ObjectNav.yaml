@@ -10,6 +10,8 @@ agent_cfg:
   explore_bias: 4 
 
 
+  vlm_score_threshold: 0.15
+
 
   # Calibrate using VLM. If this is higher, less result will be clipped
   max_action_dist_calibration: 1.7
@@ -52,7 +54,8 @@ sim_cfg:
 
 env_cfg:
   num_episodes: 1
-  max_steps: 10
+  # max_steps: 10
+  max_steps: 20
   log_freq: 1
   split: val
   success_threshold: 0.3 

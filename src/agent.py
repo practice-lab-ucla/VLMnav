@@ -7,7 +7,7 @@ import cv2
 import ast
 import concurrent.futures
 
-from simWrapper import PolarAction
+from simWrapper import PolarAction, SimWrapper
 from utils import *
 from vlm import *
 from pivot import PIVOT
@@ -107,10 +107,23 @@ class VLMNavAgent(Agent):
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self.fov = cfg['sensor_cfg']['fov']
+
+
+
+        self.simWrapper: SimWrapper = None
         self.resolution = (
             1080 // cfg['sensor_cfg']['res_factor'],
             1920 // cfg['sensor_cfg']['res_factor']
         )
+
+
+        self.tree_action_queue = []
+        self.tree_root_state = []
+
+
+
+
+
 
         self.focal_length = calculate_focal_length(self.fov, self.resolution[1])
         self.scale = cfg['map_scale']
@@ -124,6 +137,77 @@ class VLMNavAgent(Agent):
 
     def step(self, obs: dict):
         agent_state: habitat_sim.AgentState = obs['agent_state']
+        self.last_obs = obs.copy() 
+
+
+        if getattr(self, "defer_rewind_to_root", False):
+            print("↩️ Rewinding to root before applying new action")
+            self.defer_rewind_to_root = False  # consume flag
+
+            # Step 1: Reset agent pose
+            agent = self.simWrapper.sim.get_agent(0)
+            new_state = habitat_sim.AgentState()
+            new_state.position = self.tree_root_state.position
+            new_state.rotation = self.tree_root_state.rotation
+            agent.set_state(new_state)
+
+            # Step 2: Refresh observation
+            obs = self.simWrapper.sim.get_sensor_observations(0)
+            obs['agent_state'] = agent.get_state()
+
+            # ✅ Restore 'goal' if it was present
+            if hasattr(self, "last_obs") and "goal" in self.last_obs:
+                obs["goal"] = self.last_obs["goal"]
+
+
+            # Step 3: Override action proposal to be consistent with tree
+            metadata = {}
+            metadata['a_final'] = self.tree_root_a_final
+
+
+
+
+
+
+
+
+            # 👉 If inside tree, continue taking queued actions
+            if self.tree_action_queue:
+                print("🌲 Continuing tree-style queue:", self.tree_action_queue)
+                next_action = self.tree_action_queue.pop(0)
+                agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
+
+                metadata['step_metadata'] = {
+                    'action_number': next_action,
+                    'success': 1,
+                    'score': 1.0,
+                    'confident_score': [],
+                    'top_actions': self.tree_action_queue.copy()
+                }
+                metadata['logging_data'] = {}
+                metadata['images'] = {
+                    'color_sensor': obs['color_sensor']
+                }
+
+
+                a_final = self.tree_root_a_final
+
+                chosen_action_image = obs['color_sensor'].copy()
+                self._project_onto_image(
+                    a_final, chosen_action_image, obs['agent_state'],
+                    obs['agent_state'].sensor_states['color_sensor'],
+                    chosen_action=next_action
+                )
+                metadata['images']['color_sensor_chosen'] = chosen_action_image
+
+                print(f"➡️ Taking queued action: {next_action}")
+                self.step_ndx += 1
+                return agent_action, metadata
+            
+
+
+
+
 
 
 
@@ -159,6 +243,78 @@ class VLMNavAgent(Agent):
             self.init_pos = agent_state.position
 
         agent_action, metadata = self._choose_action(obs)
+
+
+
+        print(f"get issue@@@@@@@@@@@@@@@@@@@", self.tree_action_queue)
+
+        # if it is empty create a tree
+
+        top_actions = metadata['step_metadata'].get('top_actions', [])
+        if not self.tree_action_queue and len(top_actions) > 1:
+
+            print(f"top action number", len(top_actions))
+
+
+
+            self.tree_root_state = obs['agent_state']
+            self.tree_action_queue = top_actions.copy()
+
+
+            
+
+            self.tree_root_a_final = metadata['a_final']  # ✅ Save original a_final
+
+            print(f"🌲 Tree-style queue initialized: {self.tree_action_queue}")
+
+
+
+
+        # ##################### override the action with the tree action ################
+        # if self.tree_action_queue:
+        #     print("🌲 Tree-style queue active:", self.tree_action_queue)
+
+            ########################## Remove the first item in the list and return it
+            next_action = self.tree_action_queue.pop(0)  # Get next high-scoring action
+
+            print(f"action to take now",next_action)
+
+            # apply the action in the original recorded a_final
+            agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
+
+
+            # Update metadata to reflect overridden action
+            metadata['step_metadata']['action_number'] = next_action
+
+
+
+
+        ######################################################################  rewind##########################
+        selected_action = metadata['step_metadata']['action_number']
+
+
+
+        print(f"degbut the queue remaining action",self.tree_action_queue)
+
+        if selected_action == 0 and self.tree_action_queue:
+            print("🔁 Turned around — will rewind to root next step")
+            self.defer_rewind_to_root = True
+
+            # agent = self.simWrapper.sim.get_agent(0)
+            # new_state = habitat_sim.AgentState()
+            # new_state.position = self.tree_root_state.position
+            # new_state.rotation = self.tree_root_state.rotation
+            # agent.set_state(new_state)
+
+            # obs = self.simWrapper.sim.get_sensor_observations(0)
+            # obs['agent_state'] = agent.get_state()
+
+            # metadata['a_final'] = self.tree_root_a_final
+
+
+                
+        # new_state.position = np.array([9.5, 2.06447, 1])
+        # new_state.rotation = np.array([0.0, -0.76604444, 0.0, -0.64278761])
 
 
         confidence_score = metadata['step_metadata'].get('score') 
@@ -221,6 +377,12 @@ class VLMNavAgent(Agent):
         return self.actionVLM.get_spend() + self.stoppingVLM.get_spend()
 
     def reset(self):
+
+        self.tree_action_queue = []
+        self.tree_root_state = None
+
+
+
         self.voxel_map = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
         self.explored_map = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
         self.stopping_calls = [-2]
@@ -393,7 +555,7 @@ class VLMNavAgent(Agent):
 
 
         # min_angle = 1
-        print(f"debug here hhhhhhhhhhhhhhhhhhhhhhhhhhhh",min_angle )
+        # print(f"debug here hhhhhhhhhhhhhhhhhhhhhhhhhhhh",min_angle )
 
 
         explore_bias = self.cfg['explore_bias']
@@ -569,6 +731,39 @@ class VLMNavAgent(Agent):
             step_metadata['confident_score'] = response_dict.get('confident_score', [])
 
             # print(f"Chosen Action: {step_metadata['action_number']}, Confidence Score: {step_metadata['score']}, Confident Score: {step_metadata['confident_score']}")
+
+
+
+
+            # ===  STEP 2: Tree-style top-actions selection ===
+            threshold = self.cfg.get('vlm_score_threshold')
+            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+            action_offset = 0 if turnaround_available else 1
+
+            scored_actions = [
+                (i + action_offset, score)
+                for i, score in enumerate(step_metadata['confident_score'])
+                if score >= threshold
+            ]
+
+            # Sort by confidence in ascending order
+            scored_actions.sort(key=lambda x: x[1])
+
+            # Extract only the action indices, now ordered from lowest to highest confidence
+            top_actions = [idx for idx, _ in scored_actions]
+            step_metadata['top_actions'] = top_actions
+
+
+
+
+            print(f'getting actions ################################################',top_actions)
+            # ===================================================
+
+
+
+
+
+
 
             norm = VLMNavAgent.normalize_scores(step_metadata['confident_score'])  
             print(f"Chosen Action: {step_metadata['action_number']}, normalized score for all actions: {norm}")
