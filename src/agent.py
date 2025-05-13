@@ -246,7 +246,7 @@ class VLMNavAgent(Agent):
 
 
 
-        print(f"get issue@@@@@@@@@@@@@@@@@@@", self.tree_action_queue)
+        # print(f"get issue@@@@@@@@@@@@@@@@@@@", self.tree_action_queue)
 
         # if it is empty create a tree
 
@@ -704,7 +704,7 @@ class VLMNavAgent(Agent):
         Parses the response for the chosen action number and confidence scores.
         """
 
-# #############################################3 extract angle ################################################
+# ############################################# extract angle ################################################
 #         print("🧭 Candidate action angles (relative to agent's heading):")
 #         for idx, (_, theta_i) in enumerate(a_final):
 #             angle_deg = np.degrees(theta_i)
