@@ -746,8 +746,15 @@ class VLMNavAgent(Agent):
                 if score >= threshold
             ]
 
+
+            ###################################################################
             # Sort by confidence in ascending order
-            scored_actions.sort(key=lambda x: x[1])
+            # scored_actions.sort(key=lambda x: x[1])
+
+
+            ############### deceending order ######################
+            scored_actions.sort(key=lambda x: x[1], reverse=True)
+
 
             # Extract only the action indices, now ordered from lowest to highest confidence
             top_actions = [idx for idx, _ in scored_actions]
