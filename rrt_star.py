@@ -18,7 +18,7 @@ class Node:
 # search_radius = 20
 
 
-meters_per_pixel = 0.01
+meters_per_pixel = 0.005
 max_iterations = 1000
 step_size = 0.1
 search_radius = 1

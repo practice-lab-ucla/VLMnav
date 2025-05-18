@@ -6,8 +6,13 @@ import cv2
 map_path = "topdown_maps_single/occupancy_h2.06.npy"
 # [6.5, 2.06447, 3.25]
 
-x_meters, y_meters = 1.0274764  + 0.77397, 1.4455771 + 1.5698568  # Replace with the point you want to visualize
-meters_per_pixel = 0.01
+x_meters, y_meters = 4.2743988   + 0.77397, 1.7801433 + 2.5698568  # Replace with the point you want to visualize
+meters_per_pixel = 0.005
+
+
+# 📍 Agent Position: [1.243993  2.0644748 2.3801432]
+# 🧭 Agent Rotation: quaternion(0.675563037395477, 0, 0.737302243709564, 0)
+
 
 # ---- Load map ----
 occupancy = np.load(map_path)
@@ -31,7 +36,7 @@ vis_map = np.stack([255 * (1 - occupancy)] * 3, axis=-1).astype(np.uint8)
 vis_map = np.ascontiguousarray(vis_map)
 
 # Mark the point
-cv2.circle(vis_map, (x_px, y_px), 1, (0, 0, 255), -1)  # Red dot
+cv2.circle(vis_map, (x_px, y_px), 5, (0, 0, 255), -1)  # Red dot
 
 # Show and save
 plt.figure(figsize=(8, 8))

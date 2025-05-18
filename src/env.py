@@ -120,11 +120,13 @@ class Env:
             episode_ndx (int): The index of the episode to run.
         """
         obs = self._initialize_episode(episode_ndx)
+        self.current_episode_ndx = episode_ndx 
 
         logging.info(f'\n===================STARTING RUN: {self.curr_run_name} ===================\n')
         for _ in range(self.cfg['max_steps']):
             try:
-                agent_action = self._step_env(obs)
+                # agent_action = self._step_env(obs)
+                agent_action = self._step_env(obs, episode_ndx)
                 if agent_action is None:
                     break
                 obs = self.simWrapper.step(agent_action)
@@ -468,8 +470,10 @@ class ObjectNavEnv(Env):
         }
         self.init_pos = np.array(episode['start_position'])
 
-        # self.init_pos = np.array([6.5, 2.06447, 3.25])
+
         self.init_pos = np.array([9.5, 2.06447, 1])
+
+        # self.init_pos = np.array([1.243993 , 2.0644748 ,2.3801432])
 
 
         
@@ -483,6 +487,8 @@ class ObjectNavEnv(Env):
 
 
         rotation = np.array([0.0, -0.76604444, 0.0, -0.64278761])   
+        # rotation = np.array([0.675563037395477, 0, 0.737302243709564, 0])   
+
 
         print(f"Agent starts at position: {self.init_pos}")
         print(f"Agent starts at orientation: {rotation}")
@@ -512,7 +518,9 @@ class ObjectNavEnv(Env):
         obs = self.simWrapper.step(PolarAction.null)
         return obs
 
-    def _step_env(self, obs: dict):
+    # def _step_env(self, obs: dict):
+    def _step_env(self, obs: dict, episode_ndx: int):
+        self.agent.episode_ndx = episode_ndx
         """
         Takes a step in the environment for the ObjectNav task.
 

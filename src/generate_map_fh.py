@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-def extract_and_save_topdown_map(scene_path, height=2.1, meters_per_pixel=0.01, output_dir="topdown_maps_single"):
+def extract_and_save_topdown_map(scene_path, height=2.1, meters_per_pixel=0.005, output_dir="topdown_maps_single"):
 
     """
     Extracts a top-down occupancy map and saves it as .npy/.png files.

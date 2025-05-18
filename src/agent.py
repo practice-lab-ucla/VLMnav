@@ -6,6 +6,8 @@ import numpy as np
 import cv2
 import ast
 import concurrent.futures
+import csv
+import os
 
 from simWrapper import PolarAction, SimWrapper
 from utils import *
@@ -174,6 +176,7 @@ class VLMNavAgent(Agent):
             # 👉 If inside tree, continue taking queued actions
             if self.tree_action_queue:
                 print("🌲 Continuing tree-style queue:", self.tree_action_queue)
+                print()
                 next_action = self.tree_action_queue.pop(0)
                 agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
 
@@ -250,10 +253,50 @@ class VLMNavAgent(Agent):
 
         # if it is empty create a tree
 
+
+
+        step_metadata = metadata['step_metadata']
+
+
+
+
+        # === STEP 2: Tree-style top-actions selection ===
+        if step_metadata.get('action_number') != -1:  # ✅ Only proceed if not terminating
+            threshold = self.cfg.get('vlm_score_threshold')
+            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+            action_offset = 0 if turnaround_available else 1
+
+            scored_actions = [
+                (i + action_offset, score)
+                for i, score in enumerate(step_metadata['confident_score'])
+                if score >= threshold
+            ]
+
+            scored_actions.sort(key=lambda x: x[1], reverse=True)
+            top_actions = [idx for idx, _ in scored_actions]
+            step_metadata['top_actions'] = top_actions
+
+            print(f'✅ Tree-style top actions selected: {top_actions}')
+        else:
+            print("⛔ Skipping tree-style selection — agent has chosen to stop.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         top_actions = metadata['step_metadata'].get('top_actions', [])
         if not self.tree_action_queue and len(top_actions) > 1:
 
-            print(f"top action number", len(top_actions))
+            print(f"top action number size", len(top_actions))
 
 
 
@@ -277,7 +320,7 @@ class VLMNavAgent(Agent):
             ########################## Remove the first item in the list and return it
             next_action = self.tree_action_queue.pop(0)  # Get next high-scoring action
 
-            print(f"action to take now",next_action)
+            print(f"override previous action, action to take now:",next_action)
 
             # apply the action in the original recorded a_final
             agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
@@ -390,6 +433,20 @@ class VLMNavAgent(Agent):
         self.init_pos = None
         self.turned = -self.cfg['turn_around_cooldown']
         self.actionVLM.reset()
+
+
+
+        ####################################################### initialize a csv file that saves the RRT score ###########################3
+        RRT_SCORE_LOG_PATH = "score_data/rrt_score_log.csv"
+
+        if not os.path.exists(RRT_SCORE_LOG_PATH):
+            os.makedirs(os.path.dirname(RRT_SCORE_LOG_PATH), exist_ok=True)
+            with open(RRT_SCORE_LOG_PATH, mode='w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Episode", "Step", "RRT_Score"])
+
+
+
 
     def _construct_prompt(self, **kwargs):
         raise NotImplementedError
@@ -737,6 +794,8 @@ class VLMNavAgent(Agent):
 
             # ===  STEP 2: Tree-style top-actions selection ===
             threshold = self.cfg.get('vlm_score_threshold')
+
+
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
             action_offset = 0 if turnaround_available else 1
 
@@ -766,7 +825,7 @@ class VLMNavAgent(Agent):
 
 
             norm = VLMNavAgent.normalize_scores(step_metadata['confident_score'])  
-            print(f"Chosen Action: {step_metadata['action_number']}, normalized score for all actions: {norm}")
+            print(f"Highes Score Action: {step_metadata['action_number']}, normalized score for all actions: {norm}")
 
             
         except (IndexError, KeyError, TypeError, ValueError) as e:
@@ -1190,9 +1249,9 @@ class ObjectNavAgent(VLMNavAgent):
 
         ########################### RRT star here ###############################
         map_origin = self.cfg.get('map_origin')
+        
 
-
-        # print(f"printing map_origin {map_origin}")
+        print(f"printing map_origin {map_origin}")
 
         x_start = agent_state.position[0] - map_origin[0] # X position in meters
         y_start = agent_state.position[2] - map_origin[1]  # 
@@ -1201,29 +1260,12 @@ class ObjectNavAgent(VLMNavAgent):
         # y_start = agent_state.position[2] + 1.5698568 # 
 
 
+
+        ######################################### initiate RRT
         start = (x_start, y_start)
         goal = (2.0, 2.5)
-
-
-
-
-        # map_path = "topdown_maps_single/occupancy_h2.1.npy"
-
-
-
-
         height = self.cfg.get('rrt_map_height')
-
-
-
-        # print(f"printing in agent.py {self.cfg['rrt_map_height']:.2f}")
-
-        
         map_path = f"topdown_maps_single/occupancy_h{height:.2f}.npy"
-
-
-
-
         path, nodes, occupancy, start_goal, reference_angle, reference_point = plan_rrt_star(start, goal, map_path)
 
 
@@ -1270,19 +1312,29 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-
-
-
-
-
-
-
-
         # If the model calls stop two times in a row, terminate the episode
         if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
             step_metadata['action_number'] = -1
             agent_action = PolarAction.stop
             logging_data = {}
+
+
+            print("stooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooop")
+
+            logging_data['STOPPING RESPONSE'] = stopping_response
+            metadata = {
+                'step_metadata': step_metadata,
+                'logging_data': logging_data,
+                'a_final': a_final,
+                'images': images
+
+            }
+            return agent_action, metadata
+
+
+
+
+
         else:
             if self.pivot is not None:
                 pivot_instruction = self._construct_prompt(goal, 'pivot')
@@ -1362,9 +1414,31 @@ class ObjectNavAgent(VLMNavAgent):
 
             if 0 <= score_idx < len(confident_scores):
                 confidence = confident_scores[score_idx]
+
+                step_metadata['rrt_score'] = confident_scores[score_idx]
                 print(f"🎯 Best VLM Option Matching RRT*: Action {best_action_idx + 1} (θ ≈ {closest_angle}°), Confidence: {confidence}")
+
+
             else:
                 print("⚠️ Best matching index out of range of confidence scores.")
+
+
+
+            rrt_score = step_metadata.get('rrt_score', None)
+            
+
+            # Log episode, step, and score 
+            try:
+                with open("score_data/rrt_score_log.csv", mode='a', newline='') as file:
+                    writer = csv.writer(file)
+                    writer.writerow([
+                        self.episode_ndx,
+                        self.step_ndx,
+                        rrt_score
+                    ])
+            except Exception as e:
+                print(f"⚠️ Failed to log RRT score: {e}")
+
 
 
 
