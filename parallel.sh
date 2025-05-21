@@ -1,10 +1,16 @@
 #!/bin/bash
 
 # Configuration Variables
-NUM_GPU=5
-INSTANCES=50
-NUM_EPISODES_PER_INSTANCE=20
-MAX_STEPS_PER_EPISODE=40
+NUM_GPU=1
+# INSTANCES=50
+# NUM_EPISODES_PER_INSTANCE=20
+
+
+INSTANCES=3
+NUM_EPISODES_PER_INSTANCE=2
+MAX_STEPS_PER_EPISODE=2
+
+
 TASK="ObjectNav"
 CFG="ObjectNav"
 NAME="ours"
@@ -67,7 +73,9 @@ while true; do
   if $ALL_DONE; then
     echo "DONE"
     echo "$(date): Sending termination signal to aggregator."
-    curl -X POST http://localhost:${port}/terminate
+    # curl -X POST http://localhost:${port}/terminate
+    curl -X POST http://localhost:${PORT}/terminate
+
     if [ $? -eq 0 ]; then
       echo "$(date): Termination signal sent successfully."
     else

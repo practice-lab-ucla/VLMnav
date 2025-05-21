@@ -434,6 +434,9 @@ class VLMNavAgent(Agent):
         self.turned = -self.cfg['turn_around_cooldown']
         self.actionVLM.reset()
 
+        # this will be passed to env.py
+        self.max_rrt_score_error = 0.0  # Reset at start of episode
+
 
 
         ####################################################### initialize a csv file that saves the RRT score ###########################3
@@ -443,7 +446,7 @@ class VLMNavAgent(Agent):
             os.makedirs(os.path.dirname(RRT_SCORE_LOG_PATH), exist_ok=True)
             with open(RRT_SCORE_LOG_PATH, mode='w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(["Episode", "Step", "RRT_Score"])
+                writer.writerow(["Episode", "Step", "RRT_Score_error"])
 
 
 
@@ -1264,6 +1267,7 @@ class ObjectNavAgent(VLMNavAgent):
         ######################################### initiate RRT
         start = (x_start, y_start)
         goal = (2.0, 2.5)
+        # goal = (99.0, 99.0)
         height = self.cfg.get('rrt_map_height')
         map_path = f"topdown_maps_single/occupancy_h{height:.2f}.npy"
         path, nodes, occupancy, start_goal, reference_angle, reference_point = plan_rrt_star(start, goal, map_path)
@@ -1425,7 +1429,12 @@ class ObjectNavAgent(VLMNavAgent):
 
 
             rrt_score = step_metadata.get('rrt_score', None)
-            
+            rrt_score_error = 1 - rrt_score
+            self.max_rrt_score_error = max(self.max_rrt_score_error, rrt_score_error)
+
+
+
+            print(f"im pritingggggggggggggggggggggggggggggggggggggggggggggggggg",self.max_rrt_score_error)
 
             # Log episode, step, and score 
             try:
@@ -1434,7 +1443,7 @@ class ObjectNavAgent(VLMNavAgent):
                     writer.writerow([
                         self.episode_ndx,
                         self.step_ndx,
-                        rrt_score
+                        rrt_score_error
                     ])
             except Exception as e:
                 print(f"⚠️ Failed to log RRT score: {e}")

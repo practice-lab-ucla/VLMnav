@@ -15,7 +15,14 @@ from PIL import Image
 from simWrapper import PolarAction, SimWrapper
 from agent import *
 from utils import *
+from scipy.spatial.transform import Rotation as R
 from generate_map_fh import extract_and_save_topdown_map
+
+
+def get_quat_from_heading_angle(heading_angle_deg):
+    angle_rad = np.radians(heading_angle_deg)
+    rot = R.from_euler('y', angle_rad)
+    return rot.as_quat()  # [x, y, z, w]
 
 class Env:
     """
@@ -174,6 +181,41 @@ class Env:
         Called after the episode is complete, saves the dataframe log, and resets the environment.
         Sends a request to the aggregator server if parallel is set to True.
         """
+
+
+
+
+
+        ######################################## get the worse score (highest error) #########################################
+
+        try:
+            os.makedirs("score_data", exist_ok=True)
+            log_path = "score_data/max_rrt_score_error.csv"
+            # Create header once
+            if not os.path.exists(log_path):
+                with open(log_path, mode='w', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Episode", "Max_RRT_Score_Error"])
+            
+            with open(log_path, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([self.curr_run_name, self.agent.max_rrt_score_error])
+        
+                
+
+        except Exception as e:
+            print(f"⚠️ Failed to log max RRT score error: {e}")
+
+        print(f"im pritingddddddddddddddddddddddddddddddddddddddddddddddddddddddd",self.agent.max_rrt_score_error)
+
+
+
+
+
+
+
+
+
         self.df.to_pickle(f'logs/{self.outer_run_name}/{self.inner_run_name}/{self.curr_run_name}/df_results.pkl')
         self.simWrapper.reset()
         self.agent.reset()
@@ -189,6 +231,8 @@ class Env:
                 for frame in tb:
                     logging.error(f"Frame {frame.filename} line {frame.lineno}")
                 logging.error(e)
+
+
 
         logging.info('\n===================RUN COMPLETE===================\n')
         if self.cfg['log_freq'] == 1:
@@ -449,9 +493,9 @@ class ObjectNavEnv(Env):
         all_objects = goals[f'{f[-1]}_{episode["object_category"]}']
 
 ############################################################################################################################
-        episode["object_category"] = 'bed'
-        # print('target')
-        print(f"target: {episode['object_category']}")
+        # episode["object_category"] = 'bed'
+
+        # print(f"target: {episode['object_category']}")
 ############################################################################################################################
 
         view_positions = []
@@ -471,28 +515,6 @@ class ObjectNavEnv(Env):
         self.init_pos = np.array(episode['start_position'])
 
 
-        self.init_pos = np.array([9.5, 2.06447, 1])
-
-        # self.init_pos = np.array([1.243993 , 2.0644748 ,2.3801432])
-
-
-        
-        ##### save the height and will use in agent.py later #######
-        self.cfg['rrt_map_height'] = float(self.init_pos[1])
-        self.agent.cfg['rrt_map_height'] = self.cfg['rrt_map_height']
-
-        rotation = episode['start_rotation']
-
-        # rotation = np.array([0, -0.73173, 0, -0.6816])
-
-
-        rotation = np.array([0.0, -0.76604444, 0.0, -0.64278761])   
-        # rotation = np.array([0.675563037395477, 0, 0.737302243709564, 0])   
-
-
-        print(f"Agent starts at position: {self.init_pos}")
-        print(f"Agent starts at orientation: {rotation}")
-
         ######################################### extract map #############################################
         height = float(self.init_pos[1])  # agent's initial y-position
         # scene_path = self.sim_cfg["scene_path"]
@@ -504,6 +526,43 @@ class ObjectNavEnv(Env):
         self.agent.cfg['map_origin'] = self.cfg['map_origin']
 
         print(f"✅ In env.py, map generated at height {height:.2f} from scene: {scene_path}")
+        #######################################################################################################
+
+
+
+        ######################################### overrride with rand ###################################
+
+        # self.init_pos = np.array([9.5, 2.06447, 1])
+
+
+
+        
+        ##### save the height and will use in agent.py later #######
+        self.cfg['rrt_map_height'] = float(self.init_pos[1])
+        self.agent.cfg['rrt_map_height'] = self.cfg['rrt_map_height']
+
+
+
+
+        rotation = episode['start_rotation']
+    
+###################################################################
+        # quat_angle = get_quat_from_heading_angle(145)
+        # print("Quaternion for a given heading:", quat_angle)
+        # rotation = np.array(quat_angle) 
+###################################################################
+
+        # rotation = np.array([0.0, 1.0, 0.0, 0.0])  #180 degree 
+
+        # rotation = np.array([0.0, -0.76604444, 0.0, -0.64278761]) 
+ 
+
+
+
+        print(f"Agent starts at position: {self.init_pos}")
+        print(f"Agent starts at orientation: {rotation}")
+
+
 
 
 
