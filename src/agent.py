@@ -1407,15 +1407,6 @@ class ObjectNavAgent(VLMNavAgent):
                 score_idx = best_action_idx
 
 
-            # score_idx = best_action_idx
-
-            # print('debug ############################',score_idx)
-
-            # print('debug ############################',len(confident_scores))
-
-
-
-
             if 0 <= score_idx < len(confident_scores):
                 confidence = confident_scores[score_idx]
 
@@ -1427,32 +1418,41 @@ class ObjectNavAgent(VLMNavAgent):
                 print("⚠️ Best matching index out of range of confidence scores.")
 
 
+        #####################################################################################################
+        rrt_score = step_metadata.get('rrt_score', None)
+        # rrt_score_error = 1 - rrt_score
+        # self.max_rrt_score_error = max(self.max_rrt_score_error, rrt_score_error)
 
-            rrt_score = step_metadata.get('rrt_score', None)
+
+        # If RRT score is missing, use 999 as a flag for failure
+        if rrt_score is None:
+            rrt_score_error = 999
+        else:
             rrt_score_error = 1 - rrt_score
             self.max_rrt_score_error = max(self.max_rrt_score_error, rrt_score_error)
 
 
 
-            print(f"im pritingggggggggggggggggggggggggggggggggggggggggggggggggg",self.max_rrt_score_error)
+        print(f"im pritingggggggggggggggggggggggggggggggggggggggggggggggggg",rrt_score_error)
 
-            # Log episode, step, and score 
-            try:
-                with open("score_data/rrt_score_log.csv", mode='a', newline='') as file:
-                    writer = csv.writer(file)
-                    writer.writerow([
-                        self.episode_ndx,
-                        self.step_ndx,
-                        rrt_score_error
-                    ])
-            except Exception as e:
-                print(f"⚠️ Failed to log RRT score: {e}")
-
-
+        # Log episode, step, and score 
+        try:
+            with open("score_data/rrt_score_log.csv", mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    self.episode_ndx,
+                    self.step_ndx,
+                    rrt_score_error
+                ])
+        except Exception as e:
+            print(f"⚠️ Failed to log RRT score: {e}")
 
 
 
 
+
+            #####################################################
+            # please note that the maximum error is saved in _post_episode function under env.py
 
 
 
