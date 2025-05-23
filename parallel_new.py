@@ -4,8 +4,8 @@ from datetime import datetime
 from multiprocessing import Pool
 
 # ========================== CONFIG ==========================
-NUM_INSTANCES = 20              # How many partition the dataset split into 
-MAX_PARALLEL = 20               # How many to actually run
+NUM_INSTANCES = 1000              # How many partition the dataset split into 
+MAX_PARALLEL = 2               # How many to actually run
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
 EPISODES_PER_INSTANCE = 1     # Episodes each instance should run
 MAX_STEPS = 2                 # Max steps per episode

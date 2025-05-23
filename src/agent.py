@@ -121,10 +121,8 @@ class VLMNavAgent(Agent):
 
         self.tree_action_queue = []
         self.tree_root_state = []
-
-
-
-
+        self.current_episode_goal = None
+        self.current_episode_idx = None 
 
 
         self.focal_length = calculate_focal_length(self.fov, self.resolution[1])
@@ -136,6 +134,21 @@ class VLMNavAgent(Agent):
         self.depth_estimator = DepthEstimator() if cfg['navigability_mode'] == 'depth_estimate' else None
         self.segmentor = Segmentor() if cfg['navigability_mode'] == 'segmentation' else None
         self.reset()
+
+
+
+        import pandas as pd
+        import ast
+        self.rrt_goal_lookup = pd.read_csv("RRT_location - Sheet1.csv", header=None)
+        self.rrt_goal_lookup.columns = ["episode_idx", "goal_str"]
+        self.rrt_goal_lookup["goal"] = self.rrt_goal_lookup["goal_str"].apply(ast.literal_eval)
+
+
+
+
+
+
+
 
     def step(self, obs: dict):
         agent_state: habitat_sim.AgentState = obs['agent_state']
@@ -212,35 +225,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
-
-# ########################### print agent location ###############################
-#         print("📍 Agent Position:", agent_state.position)
-#         print("🧭 Agent Rotation:", agent_state.rotation)
-
-#         quat = agent_state.rotation  # This is a habitat_sim.geo.Quaternionf
-#         quat_xyzw = [quat.x, quat.y, quat.z, quat.w]
-#         r = R.from_quat(quat_xyzw)
-#         euler_deg = r.as_euler('xyz', degrees=True)
-#         print("🧭 Agent Rotation in euler degree:", euler_deg)
-
-
-#         x_start = agent_state.position[0] + 1 # X position in meters
-#         y_start = agent_state.position[2] + 1.5 # 
-#         start = (x_start, y_start)
-#         goal = (2.0, 2.5)
-#         map_path = "topdown_maps_single/occupancy_h2.1.npy"
-
-
-#         path, nodes, occupancy, start_goal = plan_rrt_star(start, goal, map_path)
-
-#         if not path:
-#             print("⚠️ No valid path found. Skipping plot.")
-#         else:
-#             plot_rrt_result(path, nodes, occupancy, start_goal, map_path)
 
 
 
@@ -1350,8 +1334,68 @@ class ObjectNavAgent(VLMNavAgent):
 
         ######################################### initiate RRT
         start = (x_start, y_start)
-        goal = (2.0, 2.5)
+
         # goal = (99.0, 99.0)
+
+
+
+
+
+
+
+        goal = (2.0, 2.5)
+
+
+
+        # # ✅ Dynamically extract goal for current episode
+        # episode_idx = self.episode_ndx  
+        # goal_row = self.rrt_goal_lookup.loc[self.rrt_goal_lookup["episode_idx"] == episode_idx, "goal"].values
+
+        # if len(goal_row) == 0:
+        #     raise ValueError(f"❌ No goal found in CSV for episode index {episode_idx}")
+        # else:
+        #     goal = tuple(goal_row[0])  # This is now (x, y)
+        #     print(f"📍 Episode {episode_idx} Goal Location: x = {goal[0]:.2f}, y = {goal[1]:.2f}")
+
+
+
+
+
+
+
+
+
+        # ✅ Step 1: Only extract if it's a new episode
+        episode_idx = self.episode_ndx
+        if self.current_episode_idx != episode_idx:
+            goal_row = self.rrt_goal_lookup.loc[self.rrt_goal_lookup["episode_idx"] == episode_idx, "goal"].values
+            if len(goal_row) == 0:
+                raise ValueError(f"❌ No goal found in CSV for episode index {episode_idx}")
+            else:
+                self.current_episode_goal = tuple(goal_row[0])
+                self.current_episode_idx = episode_idx
+                
+
+        # ✅ Step 2: Use the cached goal
+        goal = self.current_episode_goal
+        print(f"📍 Episode {episode_idx} Goal Location: x = {self.current_episode_goal[0]:.2f}, y = {self.current_episode_goal[1]:.2f}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         height = self.cfg.get('rrt_map_height')
         map_path = f"topdown_maps_single/occupancy_h{height:.2f}.npy"
         path, nodes, occupancy, start_goal, reference_angle, reference_point = plan_rrt_star(start, goal, map_path)
