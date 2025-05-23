@@ -730,13 +730,71 @@ class VLMNavAgent(Agent):
 
             step_metadata['confident_score'] = response_dict.get('confident_score', [])
 
-            # print(f"Chosen Action: {step_metadata['action_number']}, Confidence Score: {step_metadata['score']}, Confident Score: {step_metadata['confident_score']}")
+
+
+
+
+
+
+
+
+
+            # === Compute RRT-based confidence score threshold ===
+
+            reference_angle = getattr(self, "latest_rrt_angle", None)
+
+            if reference_angle is not None and 'confident_score' in step_metadata:
+                reference_angle_deg = np.degrees(reference_angle)
+                print(f"✅ RRT* Reference Global Angle: {reference_angle_deg:.1f}°")
+
+                # Get agent yaw in degrees
+                agent_state = self.simWrapper.sim.get_agent(0).get_state()
+                yaw_deg = get_agent_heading_angle(agent_state.rotation)
+
+                global_angles = []
+                for idx, (_, theta_i) in enumerate(a_final):
+                    angle_deg_relative = np.degrees(theta_i)
+                    angle_deg_global = (angle_deg_relative + yaw_deg) % 360
+                    global_angles.append(angle_deg_global)
+                    print(f"  Action {idx + 1}: θ = {angle_deg_relative:.1f}° (relative), {angle_deg_global:.1f}° (global)")
+
+                # Match closest angle
+                diffs = [abs((angle - reference_angle_deg + 180) % 360 - 180) for angle in global_angles]
+                best_action_idx = int(np.argmin(diffs))
+                closest_angle = global_angles[best_action_idx]
+
+                # Determine index in confident_score
+                confident_scores = step_metadata.get('confident_score', [])
+                num_actions = len(a_final)
+                turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+
+                if turnaround_available:
+                    score_idx = 0 if best_action_idx == num_actions - 1 else best_action_idx + 1
+                else:
+                    score_idx = best_action_idx
+
+                # Extract and print the matched confidence score
+                if 0 <= score_idx < len(confident_scores):
+                    confidence = confident_scores[score_idx]
+                    step_metadata['rrt_score'] = confidence  # ✅ save for later use
+                    print(f"🎯 Best VLM Option Matching RRT*: Action {best_action_idx + 1} (θ ≈ {closest_angle:.1f}°), Confidence: {confidence}")
+                else:
+                    print("⚠️ Best matching index out of range of confidence scores.")
+                    step_metadata['rrt_score'] = self.cfg.get('vlm_score_threshold')  # fallback
+            else:
+                step_metadata['rrt_score'] = self.cfg.get('vlm_score_threshold')  # fallback
+
+
 
 
 
 
             # ===  STEP 2: Tree-style top-actions selection ===
-            threshold = self.cfg.get('vlm_score_threshold')
+
+            # threshold = self.cfg.get('vlm_score_threshold')
+            threshold = step_metadata.get('rrt_score')
+
+            print(f"importantttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",threshold)
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
             action_offset = 0 if turnaround_available else 1
 
@@ -746,10 +804,13 @@ class VLMNavAgent(Agent):
                 if score >= threshold
             ]
 
-            # Sort by confidence in ascending order
-            scored_actions.sort(key=lambda x: x[1])
+            # # Sort by confidence in ascending order
+            # scored_actions.sort(key=lambda x: x[1])
 
-            # Extract only the action indices, now ordered from lowest to highest confidence
+            # Sort by confidence in decending order
+            scored_actions.sort(key=lambda x: x[1], reverse=True)
+
+            # Extract only the action indices
             top_actions = [idx for idx, _ in scored_actions]
             step_metadata['top_actions'] = top_actions
 
@@ -1229,6 +1290,7 @@ class ObjectNavAgent(VLMNavAgent):
 
         if reference_angle is not None:
             reference_angle_deg = np.degrees(reference_angle)
+            self.latest_rrt_angle = reference_angle
             print('Reference angle from RRT* (degrees):', reference_angle_deg)
         else:
             print('⚠️ No reference angle from RRT* (path not found)')
@@ -1306,65 +1368,6 @@ class ObjectNavAgent(VLMNavAgent):
         }
 
 
-
-
-
-
-
-
-
-        if reference_angle is not None and 'confident_score' in step_metadata:
-            reference_angle_deg = np.degrees(reference_angle)
-            print(f"✅ RRT* Reference Global Angle: {reference_angle_deg:.1f}°")
-
-            # yaw_deg = euler_deg[1]
-            yaw_deg = get_agent_heading_angle(agent_state.rotation)
-
-            global_angles = []
-            for idx, (_, theta_i) in enumerate(a_final):
-                angle_deg_relative = np.degrees(theta_i)
-                angle_deg_global = (angle_deg_relative + yaw_deg) % 360
-                global_angles.append(angle_deg_global)
-                print(f"  Action {idx + 1}: θ = {angle_deg_relative:.1f}° (relative), {angle_deg_global:.1f}° (global)")
-
-            # Find the best matching angle
-            diffs = [abs((angle - reference_angle_deg + 180) % 360 - 180) for angle in global_angles]
-            best_action_idx = int(np.argmin(diffs))
-            closest_angle = global_angles[best_action_idx]
-
-            # Extract correct score
-            confident_scores = step_metadata.get('confident_score', [])
-            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
-
-            # score_idx = best_action_idx + 1 if turnaround_available else best_action_idx
-
-
-            num_actions = len(a_final)
-
-            if turnaround_available:
-                # Map visual action index → score index
-                if best_action_idx == num_actions - 1:  # turnaround action (last in a_final)
-                    score_idx = 0
-                else:
-                    score_idx = best_action_idx + 1
-            else:
-                score_idx = best_action_idx
-
-
-            # score_idx = best_action_idx
-
-            # print('debug ############################',score_idx)
-
-            # print('debug ############################',len(confident_scores))
-
-
-
-
-            if 0 <= score_idx < len(confident_scores):
-                confidence = confident_scores[score_idx]
-                print(f"🎯 Best VLM Option Matching RRT*: Action {best_action_idx + 1} (θ ≈ {closest_angle}°), Confidence: {confidence}")
-            else:
-                print("⚠️ Best matching index out of range of confidence scores.")
 
 
 
