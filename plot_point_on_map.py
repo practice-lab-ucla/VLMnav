@@ -3,10 +3,10 @@ import matplotlib.pyplot as plt
 import cv2
 
 # ---- Config ----
-map_path = "topdown_maps_single/occupancy_h2.06.npy"
+map_path = "topdown_maps_single/5cdEh9F2hJL.basis_h0.07.npy"
 # [6.5, 2.06447, 3.25]
 
-x_meters, y_meters = 4.2743988   + 0.77397, 1.7801433 + 2.5698568  # Replace with the point you want to visualize
+x_meters, y_meters = 2.5   + 6.490816, -1.84142 + 7.68859  # Replace with the point you want to visualize
 meters_per_pixel = 0.005
 
 

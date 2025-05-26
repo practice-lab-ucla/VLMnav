@@ -19,10 +19,10 @@ class Node:
 
 
 meters_per_pixel = 0.005
-max_iterations = 1000
+max_iterations = 5000
 step_size = 0.1
 search_radius = 1
-robot_radius_m = 0.05  # radius of the robot in meters
+robot_radius_m = 0.00  # radius of the robot in meters
 goal_tolerance = 1
 
 
@@ -30,15 +30,15 @@ goal_tolerance = 1
 # goal = (2.0, 2.5)
 
 
-start = (8.5, 1.26951)  
-goal = (1.0, 1.0)
+start = ( 2.349 + 6.490816, -1.84142 + 7.68859)  
+goal = (2.5   + 6.490816, -1.84142 + 7.68859)
 
 step_size = step_size/meters_per_pixel
 search_radius = search_radius/meters_per_pixel
 goal_tolerance = goal_tolerance/meters_per_pixel
 
 # Load occupancy map (0 = free, 1 = obstacle)
-map_path = "topdown_maps_single/occupancy_h2.1.npy"
+map_path = "topdown_maps_single/5cdEh9F2hJL.basis_h0.07.npy"
 occupancy = np.load(map_path)
 
 

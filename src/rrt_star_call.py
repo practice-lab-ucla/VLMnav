@@ -147,7 +147,7 @@ def plan_rrt_star(start_m, goal_m, map_path, meters_per_pixel=0.005, step_size_m
     return path, nodes, occupancy, (start, goal), reference_angle, reference_point
 
 
-def plot_rrt_result(path, nodes, occupancy, start_goal, map_path, reference_point=None, output_dir="rrt_star_record"):
+def plot_rrt_result(path, nodes, occupancy, start_goal, map_path, reference_point=None, output_dir="rrt_star_record", episode_idx=None):
 
     # Helper to find next available filename
     def get_next_filename(prefix="rrt_star_result_", ext=".png"):
@@ -157,7 +157,16 @@ def plot_rrt_result(path, nodes, occupancy, start_goal, map_path, reference_poin
             i += 1
         return os.path.join(output_dir, f"{prefix}{i}{ext}")
 
-    save_path = get_next_filename()
+    # save_path = get_next_filename()
+
+
+
+    os.makedirs(output_dir, exist_ok=True)
+    if episode_idx is not None:
+        save_path = os.path.join(output_dir, f"rrt_result_ep{episode_idx}.png")
+    else:
+        save_path = get_next_filename()
+
 
     original_occupancy = np.load(map_path)
     vis_map = np.stack([255 * (1 - original_occupancy)] * 3, axis=-1).astype(np.uint8)
