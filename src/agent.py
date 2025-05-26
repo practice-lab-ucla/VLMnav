@@ -1362,10 +1362,10 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
+        ############################################# load goal locaiton from CSV file #############################################
 
 
-
-        # ✅ Step 1: Only extract if it's a new episode
+        # Only extract if it's a new episode
         episode_idx = self.episode_ndx
         if self.current_episode_idx != episode_idx:
             goal_row = self.rrt_goal_lookup.loc[self.rrt_goal_lookup["episode_idx"] == episode_idx, "goal"].values
@@ -1376,7 +1376,7 @@ class ObjectNavAgent(VLMNavAgent):
                 self.current_episode_idx = episode_idx
                 
 
-        # ✅ Step 2: Use the cached goal
+        # Use the cached goal
         goal = self.current_episode_goal
         print(f"📍 Episode {episode_idx} Goal Location: x = {self.current_episode_goal[0]:.2f}, y = {self.current_episode_goal[1]:.2f}")
 
@@ -1397,7 +1397,16 @@ class ObjectNavAgent(VLMNavAgent):
 
 
         height = self.cfg.get('rrt_map_height')
-        map_path = f"topdown_maps_single/occupancy_h{height:.2f}.npy"
+        # map_path = f"topdown_maps_single/occupancy_h{height:.2f}.npy"
+
+        scene_filename = os.path.basename(self.simWrapper.scene_path)  # e.g., '4ok3usBNeis.basis.glb'
+        scene_name = os.path.splitext(scene_filename)[0]  
+        map_path = f"topdown_maps_single/{scene_name}_h{height:.2f}.npy"
+
+        print(f"map path file name mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",map_path)
+
+
+
         path, nodes, occupancy, start_goal, reference_angle, reference_point = plan_rrt_star(start, goal, map_path)
 
 

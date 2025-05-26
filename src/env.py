@@ -471,6 +471,8 @@ class ObjectNavEnv(Env):
                 hsh = f.split('.')[0]
                 self.goals[hsh] = js['goals_by_category']
                 self.all_episodes += js['episodes']
+        
+
 
         self.num_episodes = len(self.all_episodes)
 
@@ -486,6 +488,7 @@ class ObjectNavEnv(Env):
         f = episode['scene_id'].split('/')[1:]
         self.sim_cfg['scene_id'] = f[1][2:5]
         self.sim_cfg['scene_path'] = f'data/scene_datasets/hm3d/{self.cfg["split"]}/{f[1]}/{f[2]}'
+
         self.simWrapper = SimWrapper(self.sim_cfg)
         self.agent.simWrapper = self.simWrapper
 
@@ -517,9 +520,9 @@ class ObjectNavEnv(Env):
 
         ######################################### extract map #############################################
         height = float(self.init_pos[1])  # agent's initial y-position
-        # scene_path = self.sim_cfg["scene_path"]
+        scene_path = self.sim_cfg["scene_path"]
 
-        scene_path = "data/scene_datasets/hm3d/val/00877-4ok3usBNeis/4ok3usBNeis.basis.glb"
+        # scene_path = "data/scene_datasets/hm3d/val/00877-4ok3usBNeis/4ok3usBNeis.basis.glb"
         occupancy_map, map_origin = extract_and_save_topdown_map(scene_path, height=height)
 
         self.cfg['map_origin'] = map_origin

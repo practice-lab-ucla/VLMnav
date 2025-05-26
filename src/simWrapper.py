@@ -32,7 +32,13 @@ class SimWrapper:
 
         :param cfg: Dictionary with configurations for the simulator, agents, and sensors.
         """
+        
         self.scene_id = cfg['scene_id']
+
+
+        self.scene_path = cfg['scene_path']
+
+
         self.use_goal_image_agent = cfg['use_goal_image_agent']
         self.allow_slide = cfg['allow_slide']
         self.sensor_pitch = cfg['sensor_cfg']['pitch']

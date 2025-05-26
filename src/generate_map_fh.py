@@ -53,7 +53,16 @@ def extract_and_save_topdown_map(scene_path, height=2.1, meters_per_pixel=0.005,
     os.makedirs(output_dir, exist_ok=True)
 
     # Save occupancy grid
-    npy_filename = f"{output_dir}/occupancy_h{height:.2f}.npy"
+    # npy_filename = f"{output_dir}/occupancy_h{height:.2f}.npy"
+
+
+    #### save the map with map name as well as height #####
+    scene_name = os.path.splitext(os.path.basename(scene_path))[0]
+    npy_filename = f"{output_dir}/{scene_name}_h{height:.2f}.npy"
+
+
+
+
     np.save(npy_filename, occupancy)
     print(f"✅ Saved occupancy grid: {npy_filename}")
 
@@ -63,7 +72,7 @@ def extract_and_save_topdown_map(scene_path, height=2.1, meters_per_pixel=0.005,
     # # print(f"✅ Saved origin: {origin_filename}")
 
     # Save visual preview
-    img_filename = f"{output_dir}/topdown_map_h{height:.2f}.png"
+    img_filename = npy_filename.replace('.npy', '.png')
     plt.figure(figsize=(6, 6))
     plt.imshow(top_down_map, cmap="gray", vmin=0, vmax=1)
     plt.axis("off")
