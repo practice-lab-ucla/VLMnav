@@ -5,10 +5,10 @@ from multiprocessing import Pool
 
 # ========================== CONFIG ==========================
 NUM_INSTANCES = 1000              # How many partition the dataset split into 
-MAX_PARALLEL = 30               # How many to actually run
+MAX_PARALLEL = 27               # How many to actually run
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
 EPISODES_PER_INSTANCE = 1     # Episodes each instance should run
-MAX_STEPS = 1                 # Max steps per episode
+MAX_STEPS = 50                 # Max steps per episode
 PORT = 2000                   # Aggregator server port (optional)
 CONFIG = "ObjectNav"          # Config file name (without .yaml)
 SCRIPT_PATH = "scripts/main.py"  # Path to your main.py

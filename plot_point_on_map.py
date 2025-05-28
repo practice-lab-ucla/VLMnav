@@ -3,12 +3,11 @@ import matplotlib.pyplot as plt
 import cv2
 
 # ---- Config ----
-map_path = "topdown_maps_single/5cdEh9F2hJL.basis_h0.07.npy"
+map_path = "topdown_maps_single/4ok3usBNeis.basis_h2.06.npy"
 # [6.5, 2.06447, 3.25]
 
-x_meters, y_meters = 2.5   + 6.490816, -1.84142 + 7.68859  # Replace with the point you want to visualize
+x_meters, y_meters = 0.9+0.77397, 1.4+1.5698568  # Replace with the point you want to visualize
 meters_per_pixel = 0.005
-
 
 # 📍 Agent Position: [1.243993  2.0644748 2.3801432]
 # 🧭 Agent Rotation: quaternion(0.675563037395477, 0, 0.737302243709564, 0)
