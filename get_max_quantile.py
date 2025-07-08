@@ -10,7 +10,7 @@ df = pd.read_csv(file_path)
 
 # Calculate and print the 95th percentile of RRT_Score_error
 percentile = df["Max_RRT_Score_Error"].quantile(0.95)
-print(f"95th percentile Max_RRT_Score_Error: {percentile:.3f}")
+print(f"95th percentile Max_RRT_Score_Error: {percentile:.4f}")
 
 bin_width = 0.01
 min_val = df["Max_RRT_Score_Error"].min()

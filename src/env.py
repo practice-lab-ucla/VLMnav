@@ -186,36 +186,6 @@ class Env:
 
 
 
-        ######################################## get the worse score (highest error) #########################################
-
-        try:
-            os.makedirs("score_data", exist_ok=True)
-            log_path = "score_data/max_rrt_score_error.csv"
-            # Create header once
-            if not os.path.exists(log_path):
-                with open(log_path, mode='w', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(["Episode", "Max_RRT_Score_Error"])
-            
-            with open(log_path, mode='a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([self.curr_run_name, self.agent.max_rrt_score_error])
-        
-                
-
-        except Exception as e:
-            print(f"⚠️ Failed to log max RRT score error: {e}")
-
-        print(f"im pritingddddddddddddddddddddddddddddddddddddddddddddddddddddddd",self.agent.max_rrt_score_error)
-
-
-
-
-
-
-
-
-
         self.df.to_pickle(f'logs/{self.outer_run_name}/{self.inner_run_name}/{self.curr_run_name}/df_results.pkl')
         self.simWrapper.reset()
         self.agent.reset()
@@ -535,7 +505,7 @@ class ObjectNavEnv(Env):
 
         ######################################### overrride with rand ###################################
 
-        # self.init_pos = np.array([9.5, 2.06447, 1])
+        # self.init_pos = np.array([ 1.3 ,  2.0644748 , 2])
 
 
 
@@ -557,7 +527,7 @@ class ObjectNavEnv(Env):
 
         # rotation = np.array([0.0, 1.0, 0.0, 0.0])  #180 degree 
 
-        # rotation = np.array([0.0, -0.76604444, 0.0, -0.64278761]) 
+        # rotation = np.array([-0.951111555099487, -0, -0.308847486972809, -0]) 
  
 
 
