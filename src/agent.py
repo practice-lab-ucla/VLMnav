@@ -143,6 +143,15 @@ class VLMNavAgent(Agent):
 
         ## stored in step
         self.gsv_per_step = {} 
+
+        self.adjusted_score = {}
+
+
+        self.turnaround_streak = 0
+
+        self.initiate_back_propagation = False
+
+        self.overall_stop = False
         
 
 
@@ -261,14 +270,59 @@ class VLMNavAgent(Agent):
 
         print("📝 Retrieved log inside step():")
         print(log_history_action_state)
-        print(f"📘 Retrieved GSV for Step {self.step_ndx}: {gsv:.5f}")
 
 
+
+        print("🌐 GSV Score History:")
+        for step, gsv_score in self.gsv_per_step.items():
+            print(f"  Step {step}: GSV = {gsv_score}")
+
+
+
+        print("📊 Step Score History:")
+        for step, score in self.step_score_history_dict.items():
+            print(f"  Step {step}: Score = {score}")
+
+
+        ### at the last step there is not step score because the goal is reached ###
+        if self.step_ndx in self.step_score_history_dict:
+            combined_score = self.step_score_history_dict[self.step_ndx] * gsv
+            self.adjusted_score[self.step_ndx] = combined_score
+        else:
+            print(f"model stopped skipping adjusted score.")
+
+
+        print("🧮 Adjusted Score History:")
+        for step, adj_score in self.adjusted_score.items():
+            print(f"  Step {step}: Adjusted Score = {adj_score}")
+
+
+
+
+        ##### calculate number of turns for warning purpose #####
+        selected_action = metadata['step_metadata']['action_number']
+        if selected_action == 0:
+            self.turnaround_streak += 1
+        else:
+            self.turnaround_streak = 0
 
 
 
 
         step_metadata = metadata['step_metadata']
+
+
+        if step_metadata['action_number'] == -1:
+
+            min_step = min(self.adjusted_score, key=lambda k: self.adjusted_score[k])
+            min_score = self.adjusted_score[min_step]
+            print(f"🔻 Minimum Adjusted Score before stopping: Step {min_step}, Score = {min_score:.3f}")
+
+
+
+
+
+
 
         # === STEP 2: Tree-style top-actions selection ===
         if step_metadata.get('action_number') != -1:  # ✅ Only proceed if not terminating
@@ -420,6 +474,8 @@ class VLMNavAgent(Agent):
             print("Target Found")
             return agent_action  
         
+        # discourage_distance = 0.9
+        
         adjusted_distance = agent_action.r * confidence_score
         final_distance = min(adjusted_distance, max_action_dist_calibration)
 
@@ -472,7 +528,18 @@ class VLMNavAgent(Agent):
 
         ## stored in step
         self.gsv_per_step = {} 
+
+        self.adjusted_score = {}
+
+
+        self.turnaround_streak = 0
         
+
+        self.initiate_back_propagation = False
+
+
+        ## the FINAL call stop decision will kill the entire episode ##
+        self.overall_stop = False
 
 
 
@@ -684,6 +751,7 @@ class VLMNavAgent(Agent):
         explore_bias = self.cfg['explore_bias']
         clip_frac = self.cfg['clip_frac']
         clip_mag = self.cfg['max_action_dist']
+        observe_frac = self.cfg['observe_frac']
 
         explore = explore_bias > 0
         unique = {}
@@ -747,17 +815,20 @@ class VLMNavAgent(Agent):
                 smallest_theta = longest[1]
                 longest_ndx = f.index(longest)
             
-                out.append([min(longest[0], clip_mag), longest[1], longest[2]])
+
+                ### longes 0 is distance 1 is angle 2 is if explored
+
+                out.append([min(longest[0] * observe_frac, clip_mag), longest[1], longest[2]])
                 thetas.add(longest[1])
 
                 for i in range(longest_ndx + 1, len(f)):
                     if all(abs(f[i][1] - t) > (min_angle * 1.0) for t in thetas):
-                        out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
+                        out.append([min(f[i][0] * observe_frac, clip_mag), f[i][1], f[i][2]])
                         thetas.add(f[i][1])
 
                 for i in range(longest_ndx - 1, -1, -1):
                     if all(abs(f[i][1] - t) > (min_angle * 1.0) for t in thetas):
-                        out.append([min(f[i][0], clip_mag), f[i][1], f[i][2]])
+                        out.append([min(f[i][0] * observe_frac, clip_mag), f[i][1], f[i][2]])
                         thetas.add(f[i][1])
 
 
@@ -772,7 +843,7 @@ class VLMNavAgent(Agent):
                     # print(theta_i)
 
                     if theta_i not in thetas and min([abs(theta_i - t) for t in thetas]) > min_angle*explore_bias:
-                        out.append((min(r_i, clip_mag), theta_i, e_i))
+                        out.append((min(r_i * observe_frac, clip_mag), theta_i, e_i))
                         # thetas.add(theta)
 
                         thetas.add(theta_i)
@@ -901,8 +972,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
             conf_scores = step_metadata['confident_score']
             a_final = list(a_final)
@@ -913,23 +982,25 @@ class VLMNavAgent(Agent):
 
             self.step_score_history_dict[step_number] = step_metadata['score']
 
-            print("📊 Step Score History:")
-            for step, score in self.step_score_history_dict.items():
-                print(f"  Step {step}: Score = {score}")
+            # print("📊 Step Score History:")
+            # for step, score in self.step_score_history_dict.items():
+            #     print(f"  Step {step}: Score = {score}")
 
 
 
 
 
             actions_this_step = []
+            gsv = self.global_semantic_score
 
             if turnaround_available:
                 # Turn-around → Action 0
                 r_turn, theta_turn = a_final[-1]
                 score_turn = conf_scores[0]
                 angle_deg_turn = np.degrees(theta_turn)
+                adjusted_turn = score_turn * gsv
                 actions_this_step.append(
-                    f"  Action 0 (Turn Around): angle = {angle_deg_turn}°, distance = {r_turn}m, score = {score_turn}"
+                    f"  Action 0 (Turn Around): angle = {angle_deg_turn}°, distance = {r_turn}m, score = {score_turn}, adjusted = {adjusted_turn}"
                 )
 
                 # Rest → Action 1, 2, ...
@@ -944,16 +1015,16 @@ class VLMNavAgent(Agent):
                 angle_deg = np.degrees(theta)
 
 
-
-
+            
+                adjusted = score * gsv
             ############## here we are recording all history action option #############
                 actions_this_step.append(
-                    f"  Action {i}: angle = {angle_deg}°, distance = {r}m, score = {score}"
+                    f"  Action {i}: angle = {angle_deg}°, distance = {r}m, score = {score}, adjusted = {adjusted}"
                 )
 
 
 
-            # 👉 Get agent pose
+            # Get agent pose
             agent = self.simWrapper.sim.get_agent(0)
             state = agent.get_state()
             pos = state.position
@@ -974,8 +1045,6 @@ class VLMNavAgent(Agent):
             self.step_action_log_history_dict[step_number] = log_entry
 
             # print(log_entry)
-
-
 
 
 
@@ -1554,12 +1623,35 @@ class ObjectNavAgent(VLMNavAgent):
             a_final.append(turn_around_action)
 
 
-
+############################################################################################# NAV agent####################################################3
 
         # If the model calls stop two times in a row, terminate the episode
-        if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
+        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
+
+        if (
+            len(self.stopping_calls) >= 2 and
+            self.stopping_calls[-2] == self.step_ndx - 1 and
+            self.overall_stop
+        ):
+
+            
             step_metadata['action_number'] = -1
             agent_action = PolarAction.stop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             logging_data = {}
 
 
@@ -1713,12 +1805,27 @@ class ObjectNavAgent(VLMNavAgent):
             
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
+
+
+            turnaround_warning = ""
+            if self.turnaround_streak >= 2 and not self.initiate_back_propagation:
+                turnaround_warning = (
+                    f"NOTE: You have chosen TURN AROUND for {self.turnaround_streak} consecutive steps. "
+                    "Make sure you are not going in circles or missing useful directions."
+                )
+                print(f"⚠️ [Warning Prompt Triggered] Turn-around streak: {self.turnaround_streak}")
+
+            print(f"🔁 Turn-around streak: {self.turnaround_streak}")
+
+
+
             action_prompt = (
                 f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. ' if turnaround_available else ''}"
+                f"{turnaround_warning}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "
                 f"Lastly, explain which action achieves that best and return it as JSON in the format: "

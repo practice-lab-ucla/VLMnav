@@ -255,6 +255,12 @@ class Env:
         metrics['done'] = False
         metrics['finish_status'] = 'running'
 
+
+
+
+######################################################################## when polar aciton is stop which is determined by call stop twice in a row ####################
+
+
         if agent_action is PolarAction.stop or self.step + 1 == max_steps:
             metrics['done'] = True
 
@@ -579,5 +585,6 @@ class ObjectNavEnv(Env):
 
         if metrics['done']:
             agent_action = None
+
 
         return agent_action

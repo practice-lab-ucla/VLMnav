@@ -93,23 +93,35 @@ def visualize_topdown_map_with_agent(
     # Draw trajectory through grid centers
     if position_history and len(position_history) > 1:
         grid_points = []
+        pixel_points = []
         for x_w, y_w in position_history:
             x_p = int((x_w - map_origin[0]) / meters_per_pixel)
             y_p = int((y_w - map_origin[1]) / meters_per_pixel)
-            x_center = (x_p // spacing_px) * spacing_px + spacing_px // 2
-            y_center = (y_p // spacing_px) * spacing_px + spacing_px // 2
-            grid_points.append((x_center, y_center))
+            # x_center = (x_p // spacing_px) * spacing_px + spacing_px // 2
+            # y_center = (y_p // spacing_px) * spacing_px + spacing_px // 2
+            # grid_points.append((x_center, y_center))
 
-        # Draw black dot at each center and path between centers
-        for i, pt in enumerate(grid_points):
 
-            cv2.circle(map_vis, pt, radius=3, color=(255, 0, 0), thickness=-1)  # Blue dot (BGR)
+            pixel_points.append((x_p, y_p))
 
+        # # Draw black dot at each center and path between centers
+        # for i, pt in enumerate(grid_points):
+
+        #     cv2.circle(map_vis, pt, radius=3, color=(255, 0, 0), thickness=-1)  # Blue dot (BGR)
+
+
+        #     if i > 0:
+        #         pt_prev = grid_points[i - 1]
+        #         # Use grees for last segment, blue otherwise
+        #         color = (0, 255, 0) if i == len(grid_points) - 1 else (255, 0, 0)
+        #         cv2.line(map_vis, pt_prev, pt, color=color, thickness=2)
+
+        for i, pt in enumerate(pixel_points):
+            cv2.circle(map_vis, pt, radius=3, color=(255, 0, 0), thickness=-1)  # Blue dot
 
             if i > 0:
-                pt_prev = grid_points[i - 1]
-                # Use grees for last segment, blue otherwise
-                color = (0, 255, 0) if i == len(grid_points) - 1 else (255, 0, 0)
+                pt_prev = pixel_points[i - 1]
+                color = (0, 255, 0) if i == len(pixel_points) - 1 else (255, 0, 0)
                 cv2.line(map_vis, pt_prev, pt, color=color, thickness=2)
 
     # Show or save
