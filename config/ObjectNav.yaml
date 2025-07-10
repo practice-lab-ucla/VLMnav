@@ -19,7 +19,7 @@ agent_cfg:
   max_action_dist: 1.7 # clip action by a fixed number
   min_action_dist: 0.5 # clip action by a fixed number
   clip_frac: 1.0 # clip action a flat rate
-  observe_frac: 0.9
+  observe_frac: 0.9 # we condiser at least 0.9 of the distance (0.1 from wall) for an observation to be considered as valid
 
 
   stopping_action_dist: 1.5 # length of actions after the agent calls stop

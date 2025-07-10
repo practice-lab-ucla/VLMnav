@@ -171,7 +171,7 @@ class VLMNavAgent(Agent):
 
 
 
-
+################################################################## here is where everything come together ####################################################################
 
 
     def step(self, obs: dict):
@@ -312,7 +312,8 @@ class VLMNavAgent(Agent):
         step_metadata = metadata['step_metadata']
 
 
-        if step_metadata['action_number'] == -1:
+        if self.initiate_back_propagation:
+
 
             min_step = min(self.adjusted_score, key=lambda k: self.adjusted_score[k])
             min_score = self.adjusted_score[min_step]
@@ -1249,7 +1250,11 @@ class VLMNavAgent(Agent):
         text_color = BLACK
         circle_color = WHITE
         projected = {}
-        if chosen_action == -1:
+        # if chosen_action == -1:
+        
+        if self.initiate_back_propagation:
+
+        
             put_text_on_image(
                 rgb_image, 'TERMINATING EPISODE', text_color=GREEN, text_size=4 * scale_factor,
                 location='center', text_thickness=math.ceil(3 * scale_factor), highlight=False
@@ -1628,11 +1633,17 @@ class ObjectNavAgent(VLMNavAgent):
         # If the model calls stop two times in a row, terminate the episode
         # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
 
-        if (
-            len(self.stopping_calls) >= 2 and
-            self.stopping_calls[-2] == self.step_ndx - 1 and
-            self.overall_stop
-        ):
+
+        if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
+
+            self.initiate_back_propagation = True
+
+
+        # if (
+        #     len(self.stopping_calls) >= 2 and
+        #     self.stopping_calls[-2] == self.step_ndx - 1 and
+        #     self.overall_stop
+        # ):
 
             
             step_metadata['action_number'] = -1
