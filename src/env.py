@@ -132,10 +132,25 @@ class Env:
         logging.info(f'\n===================STARTING RUN: {self.curr_run_name} ===================\n')
         for _ in range(self.cfg['max_steps']):
             try:
-                # agent_action = self._step_env(obs)
+
+
+
+                # # agent_action = self._step_env(obs)
+                # agent_action = self._step_env(obs, episode_ndx)
+                # if agent_action is None:
+                #     break
+                # obs = self.simWrapper.step(agent_action)
+
+
+
+
+
                 agent_action = self._step_env(obs, episode_ndx)
+
                 if agent_action is None:
-                    break
+                    print("⚠️ Agent returned None — skipping action this step but continuing episode")
+                    continue  # do NOT break — just skip this step
+
                 obs = self.simWrapper.step(agent_action)
 
             except Exception as e:

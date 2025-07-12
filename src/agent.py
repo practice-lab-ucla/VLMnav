@@ -15,7 +15,7 @@ from vlm import *
 from pivot import PIVOT
 from scipy.spatial.transform import Rotation as R
 from visualize_topdown import visualize_topdown_map_with_agent
-
+from habitat_sim.utils.common import quat_from_coeffs
 
 
 
@@ -152,6 +152,15 @@ class VLMNavAgent(Agent):
         self.initiate_back_propagation = False
 
         self.overall_stop = False
+
+
+
+
+
+        ### record the score
+        self.min_score_logged = False
+        self.min_step = 0
+        self.min_score = 0
         
 
 
@@ -192,7 +201,24 @@ class VLMNavAgent(Agent):
             new_state = habitat_sim.AgentState()
             new_state.position = self.tree_root_state.position
             new_state.rotation = self.tree_root_state.rotation
+
+            print(f"📍 Restoring position: {new_state.position}")
+
+            print(f"🧭 Restoring rotation (quat): {new_state.rotation}")
+
+
             agent.set_state(new_state)
+
+
+            agent_state = self.simWrapper.sim.get_agent(0).get_state()
+            print("✅ Confirmed agent state after restore:")
+            print(f"  Pos: {agent_state.position}")
+            print(f"  Rot: {agent_state.rotation}")
+
+
+
+
+
 
             # Step 2: Refresh observation
             obs = self.simWrapper.sim.get_sensor_observations(0)
@@ -273,15 +299,15 @@ class VLMNavAgent(Agent):
 
 
 
-        print("🌐 GSV Score History:")
-        for step, gsv_score in self.gsv_per_step.items():
-            print(f"  Step {step}: GSV = {gsv_score}")
+        # print("🌐 GSV Score History:")
+        # for step, gsv_score in self.gsv_per_step.items():
+        #     print(f"  Step {step}: GSV = {gsv_score}")
 
 
 
-        print("📊 Step Score History:")
-        for step, score in self.step_score_history_dict.items():
-            print(f"  Step {step}: Score = {score}")
+        # print("📊 Step Score History:")
+        # for step, score in self.step_score_history_dict.items():
+        #     print(f"  Step {step}: Score = {score}")
 
 
         ### at the last step there is not step score because the goal is reached ###
@@ -292,9 +318,9 @@ class VLMNavAgent(Agent):
             print(f"model stopped skipping adjusted score.")
 
 
-        print("🧮 Adjusted Score History:")
-        for step, adj_score in self.adjusted_score.items():
-            print(f"  Step {step}: Adjusted Score = {adj_score}")
+        # print("🧮 Adjusted Score History:")
+        # for step, adj_score in self.adjusted_score.items():
+        #     print(f"  Step {step}: Adjusted Score = {adj_score}")
 
 
 
@@ -312,42 +338,8 @@ class VLMNavAgent(Agent):
         step_metadata = metadata['step_metadata']
 
 
-        if self.initiate_back_propagation:
+        # print(f"🔻 Minimum Adjusted Score before stopping: Step {self.min_step}, Score = {self.min_score:.3f}")
 
-
-            min_step = min(self.adjusted_score, key=lambda k: self.adjusted_score[k])
-            min_score = self.adjusted_score[min_step]
-            print(f"🔻 Minimum Adjusted Score before stopping: Step {min_step}, Score = {min_score:.3f}")
-
-
-
-
-
-
-
-        # === STEP 2: Tree-style top-actions selection ===
-        if step_metadata.get('action_number') != -1:  # ✅ Only proceed if not terminating
-
-
-            threshold = self.cfg.get('vlm_score_threshold')
-
-
-            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
-            action_offset = 0 if turnaround_available else 1
-
-            scored_actions = [
-                (i + action_offset, score)
-                for i, score in enumerate(step_metadata['confident_score'])
-                if score >= threshold
-            ]
-
-            scored_actions.sort(key=lambda x: x[1], reverse=True)
-            top_actions = [idx for idx, _ in scored_actions]
-            step_metadata['top_actions'] = top_actions
-
-            # print(f'✅ Tree-style top actions selected: {top_actions}')
-        else:
-            print("⛔ Skipping tree-style selection — agent has chosen to stop.")
 
 
 
@@ -435,6 +427,20 @@ class VLMNavAgent(Agent):
 
 
 
+        if agent_action is None:
+            print("✅ Reached goal or rewound — no action needed")
+            print(f"🟢 self.goal_reached = {self.goal_reached}")
+
+            if self.goal_reached:
+                chosen_action_image = obs['color_sensor'].copy()
+                metadata['a_final'] = []  # 🛠️ Safely include empty a_final
+                self._project_onto_image([], chosen_action_image, agent_state,
+                                        agent_state.sensor_states['color_sensor'])
+                metadata['images']['color_sensor_chosen'] = chosen_action_image
+
+            self.step_ndx += 1
+            return agent_action, metadata
+
 
 
         # Adjust action distance based on confidence score
@@ -460,6 +466,137 @@ class VLMNavAgent(Agent):
         self.step_ndx += 1
         return agent_action, metadata
     
+
+
+
+
+
+
+
+
+    
+    def rewind_and_explore_from_log_state(self, min_adjusted: float):
+        import ast
+        import magnum as mn
+        from habitat_sim import AgentState
+        import numpy as np
+
+        start_ndx = self.step_ndx - 2
+        stop_ndx = 0  # 🔁 Always go back to step 0
+
+        print(f"🔁 Rewind range: from step {start_ndx} down to {stop_ndx}")
+
+        for back_step in reversed(range(stop_ndx, start_ndx + 1)):
+            log = self.step_action_log_history_dict.get(back_step)
+            if not log:
+                continue
+
+            lines = log.strip().split('\n')
+            if len(lines) < 4:
+                continue
+
+            try:
+                pos_vals = ast.literal_eval(lines[1].split(": ")[1])
+                rot_vals = ast.literal_eval(lines[2].split(": ")[1])
+
+
+            except Exception as e:
+                print(f"❌ Failed to parse state at step {back_step}: {e}")
+                continue
+
+            restored_state = AgentState()
+            restored_state.position = np.array(pos_vals)
+
+            q = np.array(rot_vals, dtype=np.float32)
+            q /= np.linalg.norm(q)
+
+            restored_state.rotation = quat_from_coeffs(q)
+
+            actions_to_retry = []
+            for line in lines[3:]:
+                if "adjusted" not in line:
+                    continue
+                try:
+                    score_val = float(line.split("adjusted = ")[1])
+                    if score_val > min_adjusted:
+                        action_number = int(line.split("Action ")[1].split(":")[0])
+                        actions_to_retry.append(action_number)
+                except:
+                    continue
+
+            if actions_to_retry:
+                print(f"🔁 Rewinding to Step {back_step}, retrying actions: {actions_to_retry}")
+                self.tree_root_state = restored_state
+                self.tree_action_queue = actions_to_retry
+                self.defer_rewind_to_root = True
+
+
+                print(f"🧿 Set tree root from Step {back_step}:")
+                print(f"   📍 Position = {restored_state.position}")
+                print(f"   🧭 Rotation (quat) = {restored_state.rotation}")
+
+                a_final = []
+                for line in lines[3:]:
+                    if "angle" in line and "distance" in line:
+                        try:
+                            angle_part = line.split("angle = ")[1].split("°")[0]
+                            distance_part = line.split("distance = ")[1].split("m")[0]
+                            angle_rad = np.radians(float(angle_part.strip()))
+                            distance = float(distance_part.strip())
+                            a_final.append((distance, angle_rad))
+                        except Exception as e:
+                            print(f"⚠️ Failed to parse action in log: {e}")
+
+                self.tree_root_a_final = a_final 
+                return True
+
+        print("⚠️ No valid rewind candidates found")
+        return False
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     
     def _adjust_action_distance(self, agent_action, confidence_score):
@@ -538,10 +675,18 @@ class VLMNavAgent(Agent):
 
         self.initiate_back_propagation = False
 
+        self.goal_reached = False
+
 
         ## the FINAL call stop decision will kill the entire episode ##
         self.overall_stop = False
 
+
+
+        ### record the score
+        self.min_score_logged = False
+        self.min_step = 0
+        self.min_score = 0
 
 
         ####################################################### initialize a csv file that saves the RRT score ###########################3
@@ -590,7 +735,7 @@ class VLMNavAgent(Agent):
                 images['color_sensor'] = new_image
 
 
-
+        
 
 
 
@@ -1031,9 +1176,17 @@ class VLMNavAgent(Agent):
             pos = state.position
             rot = state.rotation
 
+
+
             # Format position and rotation
-            pos_str = f"Agent Location: x={pos[0]:.2f}, y={pos[1]:.2f}, z={pos[2]:.2f}"
-            rot_str = f"Agent Rotation (quat): [{rot.w:.3f}, {rot.x:.3f}, {rot.y:.3f}, {rot.z:.3f}]"
+            # pos_str = f"Agent Location: x={pos[0]:.2f}, y={pos[1]:.2f}, z={pos[2]:.2f}"
+            # rot_str = f"Agent Rotation (quat): [{rot.w:.3f}, {rot.x:.3f}, {rot.y:.3f}, {rot.z:.3f}]"
+
+
+            pos_str = f"Agent Location: {[round(float(p), 2) for p in pos]}"
+            rot_str = f"Agent Rotation (quat): [{float(rot.w)}, {float(rot.x)}, {float(rot.y)}, {float(rot.z)}]"
+
+
 
             # Final log entry
 
@@ -1252,13 +1405,16 @@ class VLMNavAgent(Agent):
         projected = {}
         # if chosen_action == -1:
         
-        if self.initiate_back_propagation:
+        if self.goal_reached:
 
         
             put_text_on_image(
                 rgb_image, 'TERMINATING EPISODE', text_color=GREEN, text_size=4 * scale_factor,
                 location='center', text_thickness=math.ceil(3 * scale_factor), highlight=False
             )
+
+            self.goal_reached = False
+
             return projected
 
         start_px = agent_frame_to_image_coords(
@@ -1596,9 +1752,9 @@ class ObjectNavAgent(VLMNavAgent):
 
         self.agent_grid_history.append(grid_row_col)
 
-        print("📘 Agent Grid History:")
-        for i, (r, c) in enumerate(self.agent_grid_history):
-            print(f"  Step {i}: Grid cell (row={r}, col={c})")
+        # print("📘 Agent Grid History:")
+        # for i, (r, c) in enumerate(self.agent_grid_history):
+        #     print(f"  Step {i}: Grid cell (row={r}, col={c})")
 
 
 
@@ -1634,33 +1790,77 @@ class ObjectNavAgent(VLMNavAgent):
         # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
 
 
+
+
+
+
+
+
+
+        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
+
+        #     self.initiate_back_propagation = True
+
+
+        # # if (
+        # #     len(self.stopping_calls) >= 2 and
+        # #     self.stopping_calls[-2] == self.step_ndx - 1 and
+        # #     self.overall_stop
+        # # ):
+
+        #     if self.adjusted_score:
+        #         min_step = min(self.adjusted_score, key=lambda k: self.adjusted_score[k])
+        #         min_score = self.adjusted_score[min_step]
+        #         print(f"🔁 Initiating backtrack: min adjusted score = {min_score:.3f} at step {min_step}")
+        #         backtrack_success = self.rewind_and_explore_from_log_state(min_score)
+
+        #         if backtrack_success:
+        #             return PolarAction.null, {
+        #                 'step_metadata': {'action_number': -2, 'success': 1},
+        #                 'logging_data': {'note': 'backtrack initiated'},
+        #                 'images': {'color_sensor': obs['color_sensor']}
+        #             }
+
+
+        #     step_metadata['action_number'] = -1
+        #     agent_action = PolarAction.stop
+
+
+
+
         if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
+            self.min_step = min(self.adjusted_score, key=lambda k: self.adjusted_score[k])
+            self.min_score = self.adjusted_score[self.min_step]
+
+            print(11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111)
+            print(f"🔻 Minimum Adjusted Score before stopping: Step {self.min_step}, Score = {self.min_score:.3f}")
+            self.min_score_logged = True 
+
+
+        if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
+
 
             self.initiate_back_propagation = True
 
+            self.goal_reached = True
 
-        # if (
-        #     len(self.stopping_calls) >= 2 and
-        #     self.stopping_calls[-2] == self.step_ndx - 1 and
-        #     self.overall_stop
-        # ):
 
-            
+
+            if self.adjusted_score:
+                print(f"🔁 Initiating backtrack: min adjusted score = {self.min_score:.3f} at step {self.min_step}")
+                backtrack_success = self.rewind_and_explore_from_log_state(self.min_score)
+
+                if backtrack_success:
+                    return None, {
+                        'step_metadata': {'action_number': -2, 'success': 1},
+                        'logging_data': {'note': 'backtrack initiated'},
+                        'images': {'color_sensor': obs['color_sensor']}
+                    }
+
+            # ⛔ Only stop if backtrack failed
+            print("🛑 No backtrack options — stopping agent.")
             step_metadata['action_number'] = -1
             agent_action = PolarAction.stop
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
             logging_data = {}
@@ -1686,7 +1886,7 @@ class ObjectNavAgent(VLMNavAgent):
             angle_deg_relative = np.degrees(theta_i)
             angle_deg_global = (angle_deg_relative + yaw_deg) % 360
             global_angles.append(angle_deg_global)
-            print(f"  Action {idx + 1}: θ = {angle_deg_relative:.1f}° (relative), {angle_deg_global:.1f}° (global)")
+            # print(f"  Action {idx + 1}: θ = {angle_deg_relative:.1f}° (relative), {angle_deg_global:.1f}° (global)")
 
 
 
