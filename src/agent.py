@@ -138,6 +138,8 @@ class VLMNavAgent(Agent):
     def step(self, obs: dict):
         agent_state: habitat_sim.AgentState = obs['agent_state']
         self.last_obs = obs.copy() 
+        print("📍 Agent Position:", agent_state.position)
+        print("🧭 Agent Rotation (Quaternion):", agent_state.rotation)
 
 
         if getattr(self, "defer_rewind_to_root", False):
@@ -149,11 +151,19 @@ class VLMNavAgent(Agent):
             new_state = habitat_sim.AgentState()
             new_state.position = self.tree_root_state.position
             new_state.rotation = self.tree_root_state.rotation
+
+            print("📍 Root Agent Position:", self.tree_root_state.position)
+            print("🧭 Root Agent Rotation (Quaternion):", self.tree_root_state.rotation)
+
+
             agent.set_state(new_state)
 
             # Step 2: Refresh observation
             obs = self.simWrapper.sim.get_sensor_observations(0)
             obs['agent_state'] = agent.get_state()
+
+            print("📍 Agent Position:", agent_state.position)
+            print("🧭 Agent Rotation (Quaternion):", agent_state.rotation)
 
             # ✅ Restore 'goal' if it was present
             if hasattr(self, "last_obs") and "goal" in self.last_obs:
