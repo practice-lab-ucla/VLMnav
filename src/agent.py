@@ -216,10 +216,6 @@ class VLMNavAgent(Agent):
             print(f"  Rot: {agent_state.rotation}")
 
 
-
-
-
-
             # Step 2: Refresh observation
             obs = self.simWrapper.sim.get_sensor_observations(0)
             obs['agent_state'] = agent.get_state()
