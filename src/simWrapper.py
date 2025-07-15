@@ -6,6 +6,8 @@ import magnum as mn
 from habitat_sim.utils.common import quat_from_angle_axis, quat_to_angle_axis
 from utils import local_to_global
 
+from habitat_sim.utils.common import quat_from_coeffs
+
 
 class PolarAction:
     
@@ -134,7 +136,7 @@ class SimWrapper:
         goal_cfg.sensor_specifications = [goal_sensor_spec]
         return goal_cfg
 
-    def step(self, action: PolarAction):
+    def step(self, action: PolarAction, root_agent_state):
         """
         Move the agent based on the specified action and magnitude.
 
@@ -149,9 +151,47 @@ class SimWrapper:
             new_agent_state = habitat_sim.AgentState()
             new_agent_state.position = np.copy(curr_state.position)
             new_agent_state.rotation = curr_state.rotation
+
+
+            
+
+
+
+
             self._rotate_yaw(new_agent_state, new_agent_state.rotation, action.theta)
             self._move_forward(new_agent_state, new_agent_state.position, new_agent_state.rotation, action.r)
-            agent.set_state(new_agent_state)
+
+
+#########################
+
+
+            # new_agent_state.position = np.array([7.03487,   2.0644748, 2.26951 ], dtype=np.float32)
+            # # q = np.array([-0.731727302074432, -0, -0.681597471237183, 0], dtype=np.float32)
+            # q = np.array([-0, -0.681597471237183, 0, -0.731727302074432], dtype=np.float32)
+
+
+            # # q = np.array([0.731727361679077, 0.0, 0.681597530841827, 0.0], dtype=np.float32)
+            # q /= np.linalg.norm(q)  # Normalize to be safe
+
+            # # 🧭 Convert to magnum Quaternion
+            # quat = quat_from_coeffs(q)
+            # new_agent_state.rotation = quat
+
+            if root_agent_state is not None:
+                agent.set_state(root_agent_state)
+                active_state = root_agent_state
+            else:
+                agent.set_state(new_agent_state)
+                active_state = new_agent_state
+
+            # 
+            print("📍 New Agent Position:", active_state.position)
+            print("🧭 New Agent Rotation (quat):", active_state.rotation)
+            print("S")
+            print("S")
+            print("S")
+            print("S")
+            print("S")
 
         observation = self.sim.get_sensor_observations(0)
         observation['agent_state'] = agent.get_state()

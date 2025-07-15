@@ -187,8 +187,8 @@ class VLMNavAgent(Agent):
         agent_state: habitat_sim.AgentState = obs['agent_state']
         self.last_obs = obs.copy() 
 
-        print("📍 Agent Position:", agent_state.position)
-        print("🧭 Agent Rotation (Quaternion):", agent_state.rotation)
+        # print("📍 Agent Position:", agent_state.position)
+        # print("🧭 Agent Rotation (Quaternion):", agent_state.rotation)
 
 
 
@@ -207,7 +207,14 @@ class VLMNavAgent(Agent):
             print(f"🧭 Restoring rotation (quat): {new_state.rotation}")
 
 
-            agent.set_state(new_state)
+            # agent.set_state(new_state)
+            # self.simWrapper.set_state(new_state)
+
+            self.simWrapper.set_state(
+                pos=new_state.position,
+                quat=new_state.rotation
+            )
+
 
 
             agent_state = self.simWrapper.sim.get_agent(0).get_state()
@@ -236,11 +243,13 @@ class VLMNavAgent(Agent):
 
 
 
+
             # 👉 If inside tree, continue taking queued actions
             if self.tree_action_queue:
                 print("🌲 Continuing tree-style queue:", self.tree_action_queue)
                 next_action = self.tree_action_queue.pop(0)
 
+                # print(f"🎯 Next action to execute = {next_action}") 
 
                 agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
 
@@ -270,7 +279,7 @@ class VLMNavAgent(Agent):
                 print(f"➡️ Taking queued action: {next_action}")
                 print()
                 self.step_ndx += 1
-                return agent_action, metadata
+                return agent_action, metadata, None
             
 
 
@@ -281,7 +290,10 @@ class VLMNavAgent(Agent):
         if self.step_ndx == 0:
             self.init_pos = agent_state.position
 
-        agent_action, metadata = self._choose_action(obs)
+        # agent_action, metadata = self._choose_action(obs)
+
+        agent_action, metadata, restored_state = self._choose_action(obs)
+
 
 
 
@@ -400,21 +412,7 @@ class VLMNavAgent(Agent):
             print("🔁 Turned around — will rewind to root next step")
             self.defer_rewind_to_root = True
 
-            # agent = self.simWrapper.sim.get_agent(0)
-            # new_state = habitat_sim.AgentState()
-            # new_state.position = self.tree_root_state.position
-            # new_state.rotation = self.tree_root_state.rotation
-            # agent.set_state(new_state)
 
-            # obs = self.simWrapper.sim.get_sensor_observations(0)
-            # obs['agent_state'] = agent.get_state()
-
-            # metadata['a_final'] = self.tree_root_a_final
-
-
-                
-        # new_state.position = np.array([9.5, 2.06447, 1])
-        # new_state.rotation = np.array([0.0, -0.76604444, 0.0, -0.64278761])
 
 
         confidence_score_for_distance = metadata['step_metadata'].get('score') 
@@ -435,7 +433,7 @@ class VLMNavAgent(Agent):
                 metadata['images']['color_sensor_chosen'] = chosen_action_image
 
             self.step_ndx += 1
-            return agent_action, metadata
+            return agent_action, metadata, restored_state
 
 
 
@@ -460,7 +458,7 @@ class VLMNavAgent(Agent):
         metadata['images']['color_sensor_chosen'] = chosen_action_image
 
         self.step_ndx += 1
-        return agent_action, metadata
+        return agent_action, metadata, restored_state
     
 
 
@@ -494,8 +492,6 @@ class VLMNavAgent(Agent):
             try:
                 pos_vals = ast.literal_eval(lines[1].split(": ")[1])
                 rot_vals = ast.literal_eval(lines[2].split(": ")[1])
-
-
             except Exception as e:
                 print(f"❌ Failed to parse state at step {back_step}: {e}")
                 continue
@@ -506,6 +502,9 @@ class VLMNavAgent(Agent):
             q = np.array(rot_vals, dtype=np.float32)
             q /= np.linalg.norm(q)
 
+
+            # Move first element to the end
+            q = np.concatenate((q[1:], q[:1]))
             restored_state.rotation = quat_from_coeffs(q)
 
             actions_to_retry = []
@@ -522,11 +521,6 @@ class VLMNavAgent(Agent):
 
             if actions_to_retry:
                 print(f"🔁 Rewinding to Step {back_step}, retrying actions: {actions_to_retry}")
-                self.tree_root_state = restored_state
-                self.tree_action_queue = actions_to_retry
-                self.defer_rewind_to_root = True
-
-
                 print(f"🧿 Set tree root from Step {back_step}:")
                 print(f"   📍 Position = {restored_state.position}")
                 print(f"   🧭 Rotation (quat) = {restored_state.rotation}")
@@ -543,11 +537,17 @@ class VLMNavAgent(Agent):
                         except Exception as e:
                             print(f"⚠️ Failed to parse action in log: {e}")
 
-                self.tree_root_a_final = a_final 
-                return True
+                # Set internal state as before
+                self.tree_root_state = restored_state
+                self.tree_action_queue = actions_to_retry
+                self.tree_root_a_final = a_final
+                self.defer_rewind_to_root = True
+
+                return True, restored_state, a_final
 
         print("⚠️ No valid rewind candidates found")
-        return False
+        return False, None, None
+
 
 
 
@@ -886,7 +886,7 @@ class VLMNavAgent(Agent):
 
         min_angle = self.cfg['hard_spacing']
 
-        print(f"min angle: {np.rad2deg(min_angle):.10f}°")
+        # print(f"min angle: {np.rad2deg(min_angle):.10f}°")
 
 
 
@@ -974,9 +974,9 @@ class VLMNavAgent(Agent):
                         thetas.add(f[i][1])
 
 
-                print("Thetas after forward/backward spacing:")
-                for t in sorted(thetas):
-                    print(f"  θ = {np.rad2deg(t):.2f}°")
+                # print("Thetas after forward/backward spacing:")
+                # for t in sorted(thetas):
+                #     print(f"  θ = {np.rad2deg(t):.2f}°")
 
 
 
@@ -991,9 +991,9 @@ class VLMNavAgent(Agent):
                         thetas.add(theta_i)
 
 
-                print("Thetas after final filter:")
-                for t in sorted(thetas):
-                    print(f"  θ = {np.rad2deg(t):.2f}°")
+                # print("Thetas after final filter:")
+                # for t in sorted(thetas):
+                #     print(f"  θ = {np.rad2deg(t):.2f}°")
     
         if len(out) == 0:
             # if no explored actions or no explore bias
@@ -1700,7 +1700,7 @@ class ObjectNavAgent(VLMNavAgent):
 
         ########################### RRT star here ###############################
         map_origin = self.cfg.get('map_origin')
-        print(f"printing map_origin {map_origin}")
+        # print(f"printing map_origin {map_origin}")
 
 
 
@@ -1782,46 +1782,6 @@ class ObjectNavAgent(VLMNavAgent):
 
 ############################################################################################# NAV agent####################################################3
 
-        # If the model calls stop two times in a row, terminate the episode
-        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
-
-
-
-
-
-
-
-
-
-        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
-
-        #     self.initiate_back_propagation = True
-
-
-        # # if (
-        # #     len(self.stopping_calls) >= 2 and
-        # #     self.stopping_calls[-2] == self.step_ndx - 1 and
-        # #     self.overall_stop
-        # # ):
-
-        #     if self.adjusted_score:
-        #         min_step = min(self.adjusted_score, key=lambda k: self.adjusted_score[k])
-        #         min_score = self.adjusted_score[min_step]
-        #         print(f"🔁 Initiating backtrack: min adjusted score = {min_score:.3f} at step {min_step}")
-        #         backtrack_success = self.rewind_and_explore_from_log_state(min_score)
-
-        #         if backtrack_success:
-        #             return PolarAction.null, {
-        #                 'step_metadata': {'action_number': -2, 'success': 1},
-        #                 'logging_data': {'note': 'backtrack initiated'},
-        #                 'images': {'color_sensor': obs['color_sensor']}
-        #             }
-
-
-        #     step_metadata['action_number'] = -1
-        #     agent_action = PolarAction.stop
-
-
 
 
         if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
@@ -1844,14 +1804,16 @@ class ObjectNavAgent(VLMNavAgent):
 
             if self.adjusted_score:
                 print(f"🔁 Initiating backtrack: min adjusted score = {self.min_score:.3f} at step {self.min_step}")
-                backtrack_success = self.rewind_and_explore_from_log_state(self.min_score)
+                backtrack_success, restored_state, a_final = self.rewind_and_explore_from_log_state(self.min_score)
 
                 if backtrack_success:
                     return None, {
                         'step_metadata': {'action_number': -2, 'success': 1},
                         'logging_data': {'note': 'backtrack initiated'},
+                        'a_final': a_final,
                         'images': {'color_sensor': obs['color_sensor']}
-                    }
+                    }, restored_state
+
 
             # ⛔ Only stop if backtrack failed
             print("🛑 No backtrack options — stopping agent.")
@@ -1872,7 +1834,8 @@ class ObjectNavAgent(VLMNavAgent):
                 'images': images
 
             }
-            return agent_action, metadata
+            return agent_action, metadata, restored_state
+
 
 
 
@@ -1970,11 +1933,10 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
+        restored_state = None  # Default when not doing backtrack
 
+        return agent_action, metadata, restored_state
 
-
-
-        return agent_action, metadata
 
     def _construct_prompt(self, goal: str, prompt_type: str, num_actions: int=0):
         if prompt_type == 'stopping':
