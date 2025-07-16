@@ -218,9 +218,9 @@ class VLMNavAgent(Agent):
 
 
             agent_state = self.simWrapper.sim.get_agent(0).get_state()
-            print("✅ Confirmed agent state after restore:")
-            print(f"  Pos: {agent_state.position}")
-            print(f"  Rot: {agent_state.rotation}")
+            # print("✅ Confirmed agent state after restore:")
+            # print(f"  Pos: {agent_state.position}")
+            # print(f"  Rot: {agent_state.rotation}")
 
 
             # Step 2: Refresh observation
@@ -249,9 +249,23 @@ class VLMNavAgent(Agent):
                 print("🌲 Continuing tree-style queue:", self.tree_action_queue)
                 next_action = self.tree_action_queue.pop(0)
 
+
+                print(f"➡️ Taking queued action: {next_action}")
+                print()
+
                 # print(f"🎯 Next action to execute = {next_action}") 
 
+                print("\n🌲 Current self.tree_root_a_final:")
+                for i, (r, theta) in enumerate(self.tree_root_a_final):
+                    print(f"  Action {i+1}: distance = {r:.3f} m, angle = {theta:.3f} rad ({np.degrees(theta):.2f}°)")
+
+
+
                 agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
+                print(f"🛞 Converted to PolarAction: Distance = {agent_action.r}, Angle = {agent_action.theta:.5f}°")
+
+
+
 
                 metadata['step_metadata'] = {
                     'action_number': next_action,
@@ -276,10 +290,9 @@ class VLMNavAgent(Agent):
                 )
                 metadata['images']['color_sensor_chosen'] = chosen_action_image
 
-                print(f"➡️ Taking queued action: {next_action}")
-                print()
+
                 self.step_ndx += 1
-                return agent_action, metadata, None
+                return agent_action, metadata
             
 
 
@@ -292,7 +305,7 @@ class VLMNavAgent(Agent):
 
         # agent_action, metadata = self._choose_action(obs)
 
-        agent_action, metadata, restored_state = self._choose_action(obs)
+        agent_action, metadata = self._choose_action(obs)
 
 
 
@@ -302,8 +315,8 @@ class VLMNavAgent(Agent):
         log_history_action_state = self.step_action_log_history_dict.get(self.step_ndx)
 
 
-        print("📝 Retrieved log inside step():")
-        print(log_history_action_state)
+        # print("📝 Retrieved log inside step():")
+        # print(log_history_action_state)
 
 
 
@@ -419,8 +432,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-
         if agent_action is None:
             print("✅ Reached goal or rewound — no action needed")
             print(f"🟢 self.goal_reached = {self.goal_reached}")
@@ -433,7 +444,7 @@ class VLMNavAgent(Agent):
                 metadata['images']['color_sensor_chosen'] = chosen_action_image
 
             self.step_ndx += 1
-            return agent_action, metadata, restored_state
+            return agent_action, metadata
 
 
 
@@ -458,7 +469,7 @@ class VLMNavAgent(Agent):
         metadata['images']['color_sensor_chosen'] = chosen_action_image
 
         self.step_ndx += 1
-        return agent_action, metadata, restored_state
+        return agent_action, metadata
     
 
 
@@ -474,6 +485,7 @@ class VLMNavAgent(Agent):
         import magnum as mn
         from habitat_sim import AgentState
         import numpy as np
+        import re
 
         start_ndx = self.step_ndx - 2
         stop_ndx = 0  # 🔁 Always go back to step 0
@@ -508,16 +520,30 @@ class VLMNavAgent(Agent):
             restored_state.rotation = quat_from_coeffs(q)
 
             actions_to_retry = []
+            adjusted_scores = {}
             for line in lines[3:]:
                 if "adjusted" not in line:
                     continue
                 try:
+                    action_number = int(line.split("Action ")[1].split(":")[0])
                     score_val = float(line.split("adjusted = ")[1])
-                    if score_val > min_adjusted:
-                        action_number = int(line.split("Action ")[1].split(":")[0])
-                        actions_to_retry.append(action_number)
+                    adjusted_scores[action_number] = score_val
                 except:
                     continue
+
+            # Step 2: Identify the one with the highest adjusted score
+            if not adjusted_scores:
+                continue  # nothing to retry at this step
+            max_action = max(adjusted_scores, key=adjusted_scores.get)
+
+            # Step 3: Retry actions with high scores (but not the max one)
+            actions_to_retry = [
+                action for action, score in adjusted_scores.items()
+                if action != max_action and score > min_adjusted]
+            
+            if not actions_to_retry:
+                print(f"+++++++++++ Step {back_step} has no retryable actions above min_adjusted={min_adjusted:.3f}")
+                continue
 
             if actions_to_retry:
                 print(f"🔁 Rewinding to Step {back_step}, retrying actions: {actions_to_retry}")
@@ -525,17 +551,38 @@ class VLMNavAgent(Agent):
                 print(f"   📍 Position = {restored_state.position}")
                 print(f"   🧭 Rotation (quat) = {restored_state.rotation}")
 
-                a_final = []
+                a_final_dict = {}
                 for line in lines[3:]:
-                    if "angle" in line and "distance" in line:
+                    match = re.search(r"Action (\d+)[^:]*: angle = ([\d\.\-eE]+)[°]?, distance = ([\d\.\-eE]+)m", line)
+                    if match:
                         try:
-                            angle_part = line.split("angle = ")[1].split("°")[0]
-                            distance_part = line.split("distance = ")[1].split("m")[0]
-                            angle_rad = np.radians(float(angle_part.strip()))
-                            distance = float(distance_part.strip())
-                            a_final.append((distance, angle_rad))
+                            action_number = int(match.group(1))
+                            if action_number == 0:
+                                continue  # Skip Turn Around
+                            angle_rad = float(match.group(2))
+                            distance = float(match.group(3))
+                            a_final_dict[action_number] = (distance, angle_rad)
                         except Exception as e:
-                            print(f"⚠️ Failed to parse action in log: {e}")
+                            print(f"⚠️ Failed to parse values in line: {line} -> {e}")
+                    else:
+                        print(f"⚠️ Failed to parse action in log line: {line}")
+
+                # Reconstruct a_final as an ordered list by index
+                max_idx = max(a_final_dict.keys(), default=-1)
+
+
+
+                a_final = [a_final_dict[k] for k in sorted(a_final_dict.keys())]
+
+                print("\n📦 Parsed a_final_dict from log:")
+                for action_number, (r, theta) in sorted(a_final_dict.items()):
+                    print(f"  Action {action_number}: distance = {r:.2f}, angle = {theta:.2f}°")
+
+                print("\n📋 Reconstructed a_final list (indexed by action number):")
+                for i, (r, theta) in enumerate(a_final):
+                    print(f"  a_final[{i}] = distance: {r:.2f}, angle: {theta:.2f}°")
+
+
 
                 # Set internal state as before
                 self.tree_root_state = restored_state
@@ -543,10 +590,10 @@ class VLMNavAgent(Agent):
                 self.tree_root_a_final = a_final
                 self.defer_rewind_to_root = True
 
-                return True, restored_state, a_final
+                return True, a_final
 
         print("⚠️ No valid rewind candidates found")
-        return False, None, None
+        return False, None
 
 
 
@@ -1139,10 +1186,10 @@ class VLMNavAgent(Agent):
                 # Turn-around → Action 0
                 r_turn, theta_turn = a_final[-1]
                 score_turn = conf_scores[0]
-                angle_deg_turn = np.degrees(theta_turn)
+                angle_deg_turn = theta_turn
                 adjusted_turn = score_turn * gsv
                 actions_this_step.append(
-                    f"  Action 0 (Turn Around): angle = {angle_deg_turn}°, distance = {r_turn}m, score = {score_turn}, adjusted = {adjusted_turn}"
+                    f"  Action 0 : angle = {angle_deg_turn}, distance = {r_turn}m, score = {score_turn}, adjusted = {adjusted_turn}"
                 )
 
                 # Rest → Action 1, 2, ...
@@ -1154,14 +1201,14 @@ class VLMNavAgent(Agent):
             # Log all other actions
             for i, r_theta, score in aligned_actions:
                 r, theta = r_theta
-                angle_deg = np.degrees(theta)
+
 
 
             
                 adjusted = score * gsv
             ############## here we are recording all history action option #############
                 actions_this_step.append(
-                    f"  Action {i}: angle = {angle_deg}°, distance = {r}m, score = {score}, adjusted = {adjusted}"
+                    f"  Action {i}: angle = {theta}, distance = {r}m, score = {score}, adjusted = {adjusted}"
                 )
 
 
@@ -1186,7 +1233,7 @@ class VLMNavAgent(Agent):
 
             # Final log entry
 
-            ############## here we are recording all history agent state (pos + ori) #############
+            ############## here we are recording all history agent state (pos + ori) ################################################################
 
             log_entry = f"Step {step_number}:\n{pos_str}\n{rot_str}\n" + "\n".join(actions_this_step)
             self.step_action_log.append(log_entry)
@@ -1194,7 +1241,7 @@ class VLMNavAgent(Agent):
 
             self.step_action_log_history_dict[step_number] = log_entry
 
-            # print(log_entry)
+            print(log_entry)
 
 
 
@@ -1804,7 +1851,7 @@ class ObjectNavAgent(VLMNavAgent):
 
             if self.adjusted_score:
                 print(f"🔁 Initiating backtrack: min adjusted score = {self.min_score:.3f} at step {self.min_step}")
-                backtrack_success, restored_state, a_final = self.rewind_and_explore_from_log_state(self.min_score)
+                backtrack_success, a_final = self.rewind_and_explore_from_log_state(self.min_score)
 
                 if backtrack_success:
                     return None, {
@@ -1812,7 +1859,7 @@ class ObjectNavAgent(VLMNavAgent):
                         'logging_data': {'note': 'backtrack initiated'},
                         'a_final': a_final,
                         'images': {'color_sensor': obs['color_sensor']}
-                    }, restored_state
+                    }
 
 
             # ⛔ Only stop if backtrack failed
@@ -1834,7 +1881,7 @@ class ObjectNavAgent(VLMNavAgent):
                 'images': images
 
             }
-            return agent_action, metadata, restored_state
+            return agent_action, metadata
 
 
 
@@ -1933,9 +1980,9 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-        restored_state = None  # Default when not doing backtrack
+ 
 
-        return agent_action, metadata, restored_state
+        return agent_action, metadata
 
 
     def _construct_prompt(self, goal: str, prompt_type: str, num_actions: int=0):

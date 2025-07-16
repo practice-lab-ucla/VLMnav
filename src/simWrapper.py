@@ -136,7 +136,7 @@ class SimWrapper:
         goal_cfg.sensor_specifications = [goal_sensor_spec]
         return goal_cfg
 
-    def step(self, action: PolarAction, root_agent_state):
+    def step(self, action: PolarAction):
         """
         Move the agent based on the specified action and magnitude.
 
@@ -177,16 +177,17 @@ class SimWrapper:
             # quat = quat_from_coeffs(q)
             # new_agent_state.rotation = quat
 
-            if root_agent_state is not None:
-                agent.set_state(root_agent_state)
-                active_state = root_agent_state
-            else:
-                agent.set_state(new_agent_state)
-                active_state = new_agent_state
+            # if root_agent_state is not None:
+            #     agent.set_state(root_agent_state)
+            #     active_state = root_agent_state
+            # else:
+            #     agent.set_state(new_agent_state)
+            #     active_state = new_agent_state
 
             # 
-            print("📍 New Agent Position:", active_state.position)
-            print("🧭 New Agent Rotation (quat):", active_state.rotation)
+            # print("📍 New Agent Position:", active_state.position)
+            # print("🧭 New Agent Rotation (quat):", active_state.rotation)
+            agent.set_state(new_agent_state)
             print("S")
             print("S")
             print("S")

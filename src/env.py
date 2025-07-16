@@ -145,10 +145,10 @@ class Env:
 
 
 
-                agent_action, restored_state= self._step_env(obs, episode_ndx)
+                agent_action= self._step_env(obs, episode_ndx)
 
-                if agent_action is None:
-                    print("⚠️ Agent returned None — skipping action this step but continuing episode")
+                if agent_action is PolarAction.stop:
+                    print("Agent returned None — skipping action this step but continuing episode")
                     print("S")
                     print("S")
                     print("S")
@@ -156,30 +156,21 @@ class Env:
                     print("S")
                     print("S")
                     
-                    continue  # do NOT break — just skip this step
+                    break
+                    # continue  # do NOT break — just skip this step
 
+                ### check if it is needed to skip the obs = self.simwrapper
+                if agent_action is None:
+                    print("✅ Agent returned None — skipping sim step but continuing episode")
+                    print("S")
+                    print("S")
+                    print("S")
+                    print("S")
+                    print("S")
+                    continue
+                
 
-
-
-
-
-                root_agent_state = habitat_sim.AgentState()        
-                root_agent_state.position = np.array([7.03487,   2.0644748, 2.26951 ], dtype=np.float32)
-                # q = np.array([-0.731727302074432, -0, -0.681597471237183, 0], dtype=np.float32)
-                q = np.array([-0, -0.681597471237183, 0, -0.731727302074432], dtype=np.float32)
-
-
-                # q = np.array([0.731727361679077, 0.0, 0.681597530841827, 0.0], dtype=np.float32)
-                q /= np.linalg.norm(q)  # Normalize to be safe
-
-                # 🧭 Convert to magnum Quaternion
-                quat = quat_from_coeffs(q)
-                root_agent_state.rotation = quat
-
-
-
-
-                obs = self.simWrapper.step(agent_action, restored_state)
+                obs = self.simWrapper.step(agent_action)
 
             except Exception as e:
                 log_exception(e)
@@ -554,7 +545,7 @@ class ObjectNavEnv(Env):
 
         ######################################### overrride with rand ###################################
 
-        # self.init_pos = np.array([ 1.3 ,  2.0644748 , 2])
+        self.init_pos = np.array([ 5.16, 2.06, 3.37])
 
 
 
@@ -574,10 +565,8 @@ class ObjectNavEnv(Env):
         # rotation = np.array(quat_angle) 
 ###################################################################
 
-        # rotation = np.array([0.0, 1.0, 0.0, 0.0])  #180 degree 
 
-        # rotation = np.array([-0.951111555099487, -0, -0.308847486972809, -0]) 
- 
+        rotation = np.array([0, -0.467636317014694, -0, -0.883920967578888]) 
 
 
 
@@ -596,7 +585,7 @@ class ObjectNavEnv(Env):
         self.simWrapper.set_state(pos=self.init_pos, quat=rotation)
         self.curr_run_name = f"{episode_ndx}_{self.simWrapper.scene_id}"
 
-        obs = self.simWrapper.step(PolarAction.null, None)
+        obs = self.simWrapper.step(PolarAction.null)
         return obs
 
     # def _step_env(self, obs: dict):
@@ -616,16 +605,16 @@ class ObjectNavEnv(Env):
         agent_state = obs['agent_state']
         self.agent_distance_traveled += np.linalg.norm(agent_state.position - self.prev_agent_position)
         self.prev_agent_position = agent_state.position
-        agent_action, metadata, restored_state = self.agent.step(obs)
+        agent_action, metadata = self.agent.step(obs)
 
 
-        if restored_state is not None:
-            print("🌀 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgent was restored to backtrack state:")
-            print(f"   📍 Position = {restored_state.position}")
-            print(f"   🧭 Rotation = {restored_state.rotation}")
+        # if restored_state is not None:
+        #     print("🌀 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgent was restored to backtrack state:")
+        #     print(f"   📍 Position = {restored_state.position}")
+        #     print(f"   🧭 Rotation = {restored_state.rotation}")
 
-        else:
-            print("✅ No rewind needed — continuing with current state")
+        # else:
+        #     print("✅ No rewind needed — continuing with current state")
             
 
 
@@ -643,7 +632,7 @@ class ObjectNavEnv(Env):
         self._log(images, step_metadata, logging_data)
 
         if metrics['done']:
-            agent_action = None
+            agent_action = PolarAction.stop
 
 
-        return agent_action , restored_state
+        return agent_action
