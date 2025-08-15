@@ -545,7 +545,7 @@ class ObjectNavEnv(Env):
 
         ######################################### overrride with rand ###################################
 
-        self.init_pos = np.array([ 5.16, 2.06, 3.37])
+        # self.init_pos = np.array([ 5.16, 2.06, 3.37])
 
 
 
@@ -558,15 +558,9 @@ class ObjectNavEnv(Env):
 
 
         rotation = episode['start_rotation']
-    
-###################################################################
-        # quat_angle = get_quat_from_heading_angle(145)
-        # print("Quaternion for a given heading:", quat_angle)
-        # rotation = np.array(quat_angle) 
-###################################################################
 
 
-        rotation = np.array([0, -0.467636317014694, -0, -0.883920967578888]) 
+        # rotation = np.array([0, -0.467636317014694, -0, -0.883920967578888]) 
 
 
 

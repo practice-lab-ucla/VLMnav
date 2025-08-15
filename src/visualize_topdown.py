@@ -13,26 +13,16 @@ def visualize_topdown_map_with_agent(
     grid_spacing_m: float = 0.5,
     save_path: str = None,
     show: bool = True,
-    position_history: list = None  # List of (x, y) in world coordinates
+    agent_grid_history: dict = None,  # {step_idx: (row, col)}
+    teleport_step_flags: dict = None  # {step_idx: True/False}
 ):
     """
-    Visualizes a top-down map with:
-    - 0.5m × 0.5m grid
-    - Agent's current location
-    - Trajectory connecting visited grid centers
-    - Highlights the last segment of the path
-
-    Args:
-        map_path (str): Path to .npy occupancy grid file.
-        agent_state (habitat_sim.AgentState): Current agent state.
-        map_origin (tuple): World coordinate origin used in top-down map.
-        step_idx (int): Current step index.
-        meters_per_pixel (float): Map resolution.
-        grid_spacing_m (float): Grid spacing size in meters.
-        save_path (str): Optional output path.
-        show (bool): Whether to display via matplotlib.
-        position_history (list): List of (x, y) world positions from the agent.
+    Visualizes a top-down map with agent's trajectory.
+    Prevents connecting steps with teleportation (rewind).
     """
+    print("Teleport Step Flags:")
+    for step, is_teleport in sorted(teleport_step_flags.items()):
+        print(f"  Step {step}: {'TELEPORT' if is_teleport else 'normal'}")
     # Load map
     topdown_map = np.load(map_path)
     map_vis = (1 - topdown_map) * 255
@@ -44,87 +34,56 @@ def visualize_topdown_map_with_agent(
     x_px = int((x - map_origin[0]) / meters_per_pixel)
     y_px = int((y - map_origin[1]) / meters_per_pixel)
 
-
-    ###### get here they are in the grid #############
-
-
-
     spacing_px = int(grid_spacing_m / meters_per_pixel)
-    # grid_x = x_px // spacing_px  # column index
-    # grid_y = y_px // spacing_px  # row index
-
-
     grid_x = x_px // spacing_px + 1
     grid_y = y_px // spacing_px + 1
 
-
-
-
-
-
-
-
-
-
-
-
-
-    ######################################### below is for visualization ################################
-
-
-    # Draw agent current position (red dot)
+    # Draw agent position
     cv2.circle(map_vis, (x_px, y_px), radius=5, color=(0, 0, 255), thickness=-1)
 
-    # Grid lines
-    spacing_px = int(grid_spacing_m / meters_per_pixel)
+    # Draw grid lines
     height, width = map_vis.shape[:2]
     for i in range(0, width, spacing_px):
         cv2.line(map_vis, (i, 0), (i, height), (200, 200, 200), 1)
     for j in range(0, height, spacing_px):
         cv2.line(map_vis, (0, j), (width, j), (200, 200, 200), 1)
 
-    # Grid center dots
+    # Draw grid center dots
     for i in range(0, width, spacing_px):
         for j in range(0, height, spacing_px):
             center = (i + spacing_px // 2, j + spacing_px // 2)
             if center[0] < width and center[1] < height:
                 cv2.circle(map_vis, center, radius=1, color=(0, 0, 0), thickness=-1)
 
-    # Draw trajectory through grid centers
-    if position_history and len(position_history) > 1:
-        grid_points = []
-        pixel_points = []
-        for x_w, y_w in position_history:
-            x_p = int((x_w - map_origin[0]) / meters_per_pixel)
-            y_p = int((y_w - map_origin[1]) / meters_per_pixel)
-            # x_center = (x_p // spacing_px) * spacing_px + spacing_px // 2
-            # y_center = (y_p // spacing_px) * spacing_px + spacing_px // 2
-            # grid_points.append((x_center, y_center))
+    # Draw trajectory — skip teleport steps
+    if agent_grid_history and len(agent_grid_history) > 0:
+        full_history = list(agent_grid_history.items()) + [(step_idx, (grid_y, grid_x))]
+
+        for i in range(1, len(full_history)):
+            step_prev, (row_prev, col_prev) = full_history[i - 1]
+            step_curr, (row_curr, col_curr) = full_history[i]
 
 
-            pixel_points.append((x_p, y_p))
-
-        # # Draw black dot at each center and path between centers
-        # for i, pt in enumerate(grid_points):
-
-        #     cv2.circle(map_vis, pt, radius=3, color=(255, 0, 0), thickness=-1)  # Blue dot (BGR)
+            
+            if teleport_step_flags and teleport_step_flags.get(step_curr, False):
+                continue 
 
 
-        #     if i > 0:
-        #         pt_prev = grid_points[i - 1]
-        #         # Use grees for last segment, blue otherwise
-        #         color = (0, 255, 0) if i == len(grid_points) - 1 else (255, 0, 0)
-        #         cv2.line(map_vis, pt_prev, pt, color=color, thickness=2)
+            center_prev = (
+                col_prev * spacing_px - spacing_px // 2,
+                row_prev * spacing_px - spacing_px // 2
+            )
+            center_curr = (
+                col_curr * spacing_px - spacing_px // 2,
+                row_curr * spacing_px - spacing_px // 2
+            )
 
-        for i, pt in enumerate(pixel_points):
-            cv2.circle(map_vis, pt, radius=3, color=(255, 0, 0), thickness=-1)  # Blue dot
+            color = (0, 255, 0) if i == len(full_history) - 1 else (255, 0, 0)
+            cv2.line(map_vis, center_prev, center_curr, color=color, thickness=2)
+            cv2.circle(map_vis, center_prev, radius=3, color=(255, 0, 0), thickness=-1)
+            if i == len(full_history) - 1:
+                cv2.circle(map_vis, center_curr, radius=3, color=(255, 0, 0), thickness=-1)
 
-            if i > 0:
-                pt_prev = pixel_points[i - 1]
-                color = (0, 255, 0) if i == len(pixel_points) - 1 else (255, 0, 0)
-                cv2.line(map_vis, pt_prev, pt, color=color, thickness=2)
-
-    # Show or save
     if show:
         plt.figure(figsize=(8, 8))
         plt.imshow(map_vis)
@@ -137,6 +96,4 @@ def visualize_topdown_map_with_agent(
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         cv2.imwrite(save_path, map_vis)
 
-
     return (grid_y, grid_x)
-
