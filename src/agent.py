@@ -335,6 +335,15 @@ class VLMNavAgent(Agent):
                 print("🌲 Continuing tree-style queue:", self.tree_action_queue)
                 next_action = self.tree_action_queue.pop(0)
 
+
+                root_ndx = getattr(self, "tree_root_step_ndx", None)
+                if root_ndx is not None:
+                    if root_ndx not in self.tried_actions_by_step:
+                        self.tried_actions_by_step[root_ndx] = set()
+                    self.tried_actions_by_step[root_ndx].add(next_action)
+
+
+
                 # self.defer_rewind_to_root = len(self.tree_action_queue) > 0
 
 
@@ -457,9 +466,32 @@ class VLMNavAgent(Agent):
         if self.step_ndx == 0:
             self.init_pos = agent_state.position
 
-        # agent_action, metadata = self._choose_action(obs)
 
         agent_action, metadata = self._choose_action(obs)
+
+
+
+
+
+
+        if getattr(self, "terminate_after_local", False):
+            # Clear rewind state
+            self.tree_action_queue = []
+            self.defer_rewind_to_root = False
+            self.tree_root_state = None
+            self.tree_root_step_ndx = None
+
+            # Return STOP and mark failure
+            return PolarAction.stop, {
+                "step_metadata": {"action_number": -1, "success": 1},
+                "logging_data": {"note": "LOCAL_REWIND_EXHAUSTED"},
+                "a_final": [],
+                "images": {"color_sensor": obs["color_sensor"]}
+            }
+        
+
+
+
 
 
 
@@ -897,164 +929,140 @@ class VLMNavAgent(Agent):
 
 
 
-
-    # def step_rewind(self, current_step, selected_action):
-    #     """
-    #     Triggers rewind to the previous step if the agent prematurely chooses a turn-around.
-    #     At the next step, the agent will teleport back and retry the second-best action.
-    #     """
-    #     if selected_action != 0:
-    #         return  # Only rewind if agent chose turn-around at x+1
-
-    #     prev_step = current_step - 1
-    #     if prev_step not in self.step_action_ranking_dict:
-    #         print("it tried to turnaround into step of rewinding which is not necessary")
-    #         return
-
-    #     # Get ranked candidate actions excluding turn-around
-    #     retry_candidates = [
-    #         i for i, _ in self.step_action_ranking_dict[prev_step]
-    #         if i != 0
-    #     ]
-    #     if len(retry_candidates) < 2:
-    #         return  # Not enough alternatives to retry
-
-    #     print(f"🔁 Tree-style early rewind triggered at step {current_step} due to turn-around at x+1")
-    #     print(f"🕘 Rewinding to step {prev_step}, retrying action {retry_candidates[1]}")
-
-    #     # ⬇️ Load agent state from log at step x (prev_step)
-    #     prev_log = self.step_action_log_history_dict.get(prev_step)
-    #     if not prev_log:
-    #         return
-
-    #     # import numpy as np
-    #     # import magnum as mn
-    #     from habitat_sim import AgentState
-    #     from habitat_sim.utils.common import quat_from_coeffs
-
-    #     restored_state = AgentState()
-    #     restored_state.position = np.array(prev_log['position'], dtype=np.float32)
-
-    #     q = np.array(prev_log['rotation'], dtype=np.float32)
-    #     q /= np.linalg.norm(q)
-    #     q = np.concatenate((q[1:], q[:1]))  # [w, x, y, z] → [x, y, z, w]
-    #     restored_state.rotation = quat_from_coeffs(q)
-
-    #     # ⬇️ Set tree-style state and retry queue
-    #     self.tree_root_state = restored_state
-    #     self.tree_root_a_final = [
-    #         (a['distance'], a['angle'])
-    #         for a in prev_log['actions']
-    #         if a['index'] != 0
-    #     ]
-    #     self.tree_action_queue = [retry_candidates[1]]  # 2nd-best action
-
-    #     self.tree_root_score_log = [a['adjusted'] for a in prev_log['actions']]
-
-    #     self.defer_rewind_to_root = True
-
-    #     print(f"✅ Restored agent state from Step {prev_step}:")
-    #     print(f"   📍 Position = {restored_state.position}")
-    #     print(f"   🧭 Rotation (quat) = {restored_state.rotation}")
-    #     print(f"   🔢 tree_root_score_log = {self.tree_root_score_log}")
-
-
-    def step_rewind(self, current_step, selected_action):
+    def step_rewind(self, current_step: int, selected_action: int):
         """
-        If the agent chose turn-around at step (current_step), rewind to the previous step,
-        restore the saved pose, and queue all remaining actions from that step in order
-        (second-best, then third-best, ...). On the next .step(), the agent teleports
-        and tries the next queued action. Skips if already backtracking.
+        New local-rewind policy:
+
+        1) If current_step == 0 and selected_action == 0 → let it turn (no rewind).
+        2) If current_step > 0 and selected_action == 0:
+            - If we're NOT already rewinding:
+                root = current_step - 1
+                queue = ranked actions at root that are NOT tried at root and NOT 0
+                -> if queue empty: terminate failure
+                -> else: set root state + queue, defer teleport
+            - If we ARE already rewinding and the model picked 0 again:
+                shift root back by 1 (root = max(root-1, 0))
+                rebuild queue there (untried and NOT 0)
+                -> if queue empty: terminate failure
+                -> else: set new root state + queue, defer teleport
         """
 
-
-        # Only trigger on turn-around at x+1 and only when NOT backtracking
-        if selected_action != 0 or self.initiate_back_propagation:
+        # Rule 1: At step 0 with a turn-around, do nothing (let the real turn execute)
+        if current_step == 0 and selected_action == 0:
             return
 
-        # ✅ NEW: if we're already in a queued rewind (we have a root + a queue),
-        # and the model picked turn-around again, just rewind to the SAME root
-        # and try the NEXT sibling from the existing self.tree_action_queue.
-        if self.tree_root_state is not None and self.tree_action_queue:
-            print("🔁 Turn-around during queued rewind → rewinding to existing root to try next sibling")
+        # Only react to turn-around (0). Non-zero = normal navigation
+        if selected_action != 0:
+            return
+
+        # Helper to build a queue from a chosen root step using tried-set; excludes 0 by policy.
+        def build_queue_from_root(root_step: int):
+            ranking = self.step_action_ranking_dict.get(root_step)
+            prev_log = self.step_action_log_history_dict.get(root_step)
+            if ranking is None or prev_log is None:
+                return None, None, None  # cannot build
+
+            tried = self.tried_actions_by_step.get(root_step, set())
+            # Local-rewind policy: explore siblings only → never queue 0
+            remaining = [i for i, _ in ranking if i not in tried and i != 0]
+
+            # ---- Restore pose from log (if we have at least a state) ----
+            from habitat_sim import AgentState
+            import numpy as np
+            from habitat_sim.utils.common import quat_from_coeffs
+
+            restored = AgentState()
+            restored.position = np.array(prev_log['position'], dtype=np.float32)
+
+            q = np.array(prev_log['rotation'], dtype=np.float32)  # [w, x, y, z]
+            norm = np.linalg.norm(q)
+            if norm == 0:
+                q = np.array([1, 0, 0, 0], dtype=np.float32)
+            else:
+                q = q / norm
+            q_xyzw = np.array([q[1], q[2], q[3], q[0]], dtype=np.float32)
+            restored.rotation = quat_from_coeffs(q_xyzw)
+
+            # ---- Rebuild a_final (non-zero actions) & score log ----
+            actions = prev_log.get('actions') or []
+            nonzero_actions = sorted(
+                [a for a in actions if int(a.get('index', 0)) != 0],
+                key=lambda a: int(a['index'])
+            )
+            a_final = [(a['distance'], a['angle']) for a in nonzero_actions]
+
+            max_idx = 0
+            for a in actions:
+                try:
+                    max_idx = max(max_idx, int(a.get('index', 0)))
+                except Exception:
+                    pass
+            scores_by_index = [None] * (max_idx + 1)
+            for a in actions:
+                idx = int(a.get('index', 0))
+                scores_by_index[idx] = a.get('adjusted')
+
+            return restored, a_final, (remaining, scores_by_index)
+
+        # Case A: NOT yet rewinding — first time we see a 0 at current_step>0
+        if self.tree_root_state is None or not self.tree_action_queue:
+            root_step = current_step - 1
+
+            restored, a_final, payload = build_queue_from_root(root_step)
+            if restored is None:
+                restored, a_final, payload = build_queue_from_root(current_step)
+
+            if restored is None:
+                # No valid root to rewind to → allow the actual turn this step
+                return
+
+            remaining, scores_by_index = payload
+            if not remaining:
+                # Nothing to try at root → terminate with failure
+                self.terminate_after_local = True
+                if hasattr(self, 'logger'):
+                    self.logger.info("Local rewind: no candidates at root; terminating with failure.")
+                else:
+                    print("Local rewind: no candidates at root; terminating with failure.")
+                return
+
+            # Queue and arm defer
+            self.tree_root_state = restored
+            self.tree_root_a_final = a_final
+            self.tree_action_queue = remaining
+            self.tree_root_score_log = scores_by_index
+            self.tree_root_step_ndx = root_step
             self.defer_rewind_to_root = True
             return
 
-        # Allow step-0 local rewind: treat step 0 as the rewind root
-        prev_step = max(current_step - 1, 0)
+        # Case B: Already rewinding — model picked 0 again → shift root back by 1
+        new_root = max((self.tree_root_step_ndx or (current_step - 1)) - 1, 0)
 
-        # Try to get rankings from prev_step, else fall back to the current step
-        ranking = (self.step_action_ranking_dict.get(prev_step) or
-                self.step_action_ranking_dict.get(current_step))
-        if not ranking:
-            print(f"local rewind: no ranking found for step {prev_step} or current step; executing actual turn-around")
+        restored, a_final, payload = build_queue_from_root(new_root)
+        if restored is None:
+            # Can't move the root further back → terminate
+            self.terminate_after_local = True
+            if hasattr(self, 'logger'):
+                self.logger.info("Local rewind: no state for deeper root; terminating with failure.")
+            else:
+                print("Local rewind: no state for deeper root; terminating with failure.")
             return
 
-
-        # Build retry list: all candidates except turn-around (index 0)
-        retry_candidates = [i for i, _ in ranking if i != 0]
-        if len(retry_candidates) < 2:
-            # Nothing beyond the first choice to try
+        remaining, scores_by_index = payload
+        if not remaining:
+            self.terminate_after_local = True
+            if hasattr(self, 'logger'):
+                self.logger.info("Local rewind: exhausted after shifting root; terminating with failure.")
+            else:
+                print("Local rewind: exhausted after shifting root; terminating with failure.")
             return
 
-        # Load the saved state and actions from the log at step x (prev_step)
-        prev_log = (self.step_action_log_history_dict.get(prev_step) or
-                    self.step_action_log_history_dict.get(current_step))
-        if not prev_log:
-            return
-
-        import numpy as np
-        from habitat_sim import AgentState
-        from habitat_sim.utils.common import quat_from_coeffs
-
-        # ---- Restore pose from log ----
-        restored_state = AgentState()
-        restored_state.position = np.array(prev_log['position'], dtype=np.float32)
-
-        # prev_log['rotation'] is [w, x, y, z]; habitat expects [x, y, z, w]
-        q = np.array(prev_log['rotation'], dtype=np.float32)
-        if np.linalg.norm(q) == 0:
-            q = np.array([1, 0, 0, 0], dtype=np.float32)
-        else:
-            q = q / np.linalg.norm(q)
-        q_xyzw = np.array([q[1], q[2], q[3], q[0]], dtype=np.float32)
-        restored_state.rotation = quat_from_coeffs(q_xyzw)
-
-        # ---- Reconstruct a_final for projection / conversion paths ----
-        actions = prev_log.get('actions') or []
-        nonzero_actions = sorted(
-            [a for a in actions if a.get('index', 0) != 0],
-            key=lambda a: a['index']
-        )
-        self.tree_root_a_final = [(a['distance'], a['angle']) for a in nonzero_actions]
-
-        # ---- Index-addressable score log (so score = ...[action_number] works) ----
-        max_idx = 0
-        for a in actions:
-            try:
-                max_idx = max(max_idx, int(a.get('index', 0)))
-            except Exception:
-                pass
-        scores_by_index = [None] * (max_idx + 1)
-        for a in actions:
-            idx = int(a.get('index', 0))
-            scores_by_index[idx] = a.get('adjusted')
+        self.tree_root_state = restored
+        self.tree_root_a_final = a_final
+        self.tree_action_queue = remaining
         self.tree_root_score_log = scores_by_index
-
-        # ---- Queue ALL remaining alternatives (2nd, then 3rd, ...) ----
-        self.tree_action_queue = retry_candidates[1:]
-        # self.tree_action_queue = retry_candidates
-
-        # ---- Stash the state and mark for teleport on next step() ----
-        self.tree_root_state = restored_state
+        self.tree_root_step_ndx = new_root
         self.defer_rewind_to_root = True
-
-        print(f"🔁 Tree-style early rewind triggered at step {current_step} due to turn-around at x+1")
-        print(f"🕘 Rewinding to step {prev_step}, retrying actions in order: {self.tree_action_queue}")
-        print(f"✅ Restored agent state from Step {prev_step}:")
-        print(f"   📍 Position = {restored_state.position}")
-        print(f"   🧭 Rotation (quat) = {restored_state.rotation}")
-        print(f"   🔢 tree_root_score_log (index = action_number) length = {len(self.tree_root_score_log)}")
 
 
 
@@ -1725,7 +1733,9 @@ class VLMNavAgent(Agent):
             response_dict = self._eval_response(response)
             step_metadata['action_number'] = int(response_dict['action'])
 
-
+            if self.step_ndx not in self.tried_actions_by_step:
+                self.tried_actions_by_step[self.step_ndx] = set()
+            self.tried_actions_by_step[self.step_ndx].add(step_metadata['action_number'])
 
 
 
