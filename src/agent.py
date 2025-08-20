@@ -189,7 +189,7 @@ class VLMNavAgent(Agent):
         self.tree_root_step_ndx = None
 
 
-
+        self.goal_steps = set() 
 
 
 
@@ -664,6 +664,7 @@ class VLMNavAgent(Agent):
             min_thresh = self.best_bfs_min
             print(f"🔁 Initiating backtrack with BFS min = {min_thresh:.3f} (fallback to adjusted min if None)")
             print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            self.start_ndx = max(self.step_ndx - 1, 0)
             backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
 
             raw_action_image = obs['color_sensor'].copy()
@@ -717,10 +718,11 @@ class VLMNavAgent(Agent):
         if self.initiate_back_propagation and not self.tree_action_queue and selected_action == 0:
 
             print("🔚 Finished all sub-actions at current rewind step")
-            # print(f"🔁 Trying deeper rewind to step {self.start_ndx} with min_score {self.min_score:.3f}")
-            # backtrack_success, a_final = self.rewind_and_explore_from_log_state(self.min_score, self.start_ndx)
 
             min_thresh = self.best_bfs_min 
+
+
+            self.start_ndx = max(self.step_ndx - 1, 0)
             print(f"🔁 Trying deeper rewind to step {self.start_ndx} with min_score {min_thresh:.3f}")
             backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
 
@@ -802,6 +804,7 @@ class VLMNavAgent(Agent):
 
             min_thresh = self.best_bfs_min 
 
+            self.start_ndx = max(self.step_ndx - 1, 0)
             backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
 
             raw_action_image = obs['color_sensor'].copy()
@@ -1036,7 +1039,8 @@ class VLMNavAgent(Agent):
             return
 
         # Case B: Already rewinding — model picked 0 again → shift root back by 1
-        new_root = max((self.tree_root_step_ndx or (current_step - 1)) - 1, 0)
+        root_idx = self.tree_root_step_ndx if self.tree_root_step_ndx is not None else (current_step - 1)
+        new_root = max(root_idx - 1, 0)
 
         restored, a_final, payload = build_queue_from_root(new_root)
         if restored is None:
@@ -1078,6 +1082,11 @@ class VLMNavAgent(Agent):
         for back_step in reversed(range(stop_ndx, start_ndx + 1)):
             print(f"🔎 Checking Step {back_step} for retryable actions...")
 
+
+            if getattr(self, "goal_steps", None) and back_step in self.goal_steps:
+                print(f"+++++++++++⏭️ Skipping goal step {back_step}")
+                continue
+
             log = self.step_action_log_history_dict.get(back_step)
             if not log:
                 print(f"+++++++++++ Step {back_step} has log in that step, it is a rewind state")
@@ -1111,17 +1120,23 @@ class VLMNavAgent(Agent):
                 print(f"⚠️ Step {back_step} has no actions to retry excluding turn arond")
                 continue
 
-            max_action = max(adjusted_scores, key=adjusted_scores.get)
+            # Never retry anything we've already tried at this step (pre- or post-goal)
+            tried = self.tried_actions_by_step.get(back_step, set())
 
-            actions_to_retry = [
-                idx for idx, score in adjusted_scores.items()
-                if idx != max_action and score > min_adjusted
-                # if score > min_adjusted
-            ]
+            # Candidates: strictly above BFS bottleneck and not the turn-around (0)
+            candidates = [idx for idx, sc in adjusted_scores.items()
+                        if sc is not None and sc > min_adjusted and idx != 0]
+
+            # Global rule: remove anything ever tried at this step
+            actions_to_retry = [i for i in candidates if i not in tried]
 
             if not actions_to_retry:
-                print(f"+++++++++++ Step {back_step} has no retryable actions above min_adjusted={min_adjusted:.3f}")
+                print(f"+++++++++++ Step {back_step} has no retryable actions above min_adjusted={min_adjusted:.3f} (all tried)")
                 continue
+
+            # Optional: execute higher-scoring alternatives first
+            actions_to_retry.sort(key=lambda i: adjusted_scores[i], reverse=True)
+
 
             # Reconstruct a_final from log (excluding turn-around)
             a_final_dict = {
@@ -1145,6 +1160,7 @@ class VLMNavAgent(Agent):
             self.tree_action_queue = actions_to_retry
             self.tree_root_a_final = a_final
             self.tree_root_score_log = [a["adjusted"] for a in log["actions"]]  # ✅ log all adjusted scores
+            self.tree_root_step_ndx = back_step 
             self.defer_rewind_to_root = True
 
             
@@ -1312,6 +1328,8 @@ class VLMNavAgent(Agent):
         self.tried_actions_by_step = {}          # step_idx -> set of action indices
         # which step is the current rewind root (so we log tries against the right step)
         self.tree_root_step_ndx = None
+
+        self.goal_steps = set() 
 
 
 
@@ -2438,6 +2456,8 @@ class ObjectNavAgent(VLMNavAgent):
             self.initiate_back_propagation = True
 
             self.goal_reached = True
+
+            self.goal_steps.add(self.step_ndx)
 
 
             ################## we can still record the log with conf_score to be none
