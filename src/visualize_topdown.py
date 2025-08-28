@@ -38,62 +38,62 @@ def visualize_topdown_map_with_agent(
     grid_x = x_px // spacing_px + 1
     grid_y = y_px // spacing_px + 1
 
-    # Draw agent position
-    cv2.circle(map_vis, (x_px, y_px), radius=5, color=(0, 0, 255), thickness=-1)
+    # # Draw agent position
+    # cv2.circle(map_vis, (x_px, y_px), radius=5, color=(0, 0, 255), thickness=-1)
 
-    # Draw grid lines
-    height, width = map_vis.shape[:2]
-    for i in range(0, width, spacing_px):
-        cv2.line(map_vis, (i, 0), (i, height), (200, 200, 200), 1)
-    for j in range(0, height, spacing_px):
-        cv2.line(map_vis, (0, j), (width, j), (200, 200, 200), 1)
+    # # Draw grid lines
+    # height, width = map_vis.shape[:2]
+    # for i in range(0, width, spacing_px):
+    #     cv2.line(map_vis, (i, 0), (i, height), (200, 200, 200), 1)
+    # for j in range(0, height, spacing_px):
+    #     cv2.line(map_vis, (0, j), (width, j), (200, 200, 200), 1)
 
-    # Draw grid center dots
-    for i in range(0, width, spacing_px):
-        for j in range(0, height, spacing_px):
-            center = (i + spacing_px // 2, j + spacing_px // 2)
-            if center[0] < width and center[1] < height:
-                cv2.circle(map_vis, center, radius=1, color=(0, 0, 0), thickness=-1)
+    # # Draw grid center dots
+    # for i in range(0, width, spacing_px):
+    #     for j in range(0, height, spacing_px):
+    #         center = (i + spacing_px // 2, j + spacing_px // 2)
+    #         if center[0] < width and center[1] < height:
+    #             cv2.circle(map_vis, center, radius=1, color=(0, 0, 0), thickness=-1)
 
-    # Draw trajectory — skip teleport steps
-    if agent_grid_history and len(agent_grid_history) > 0:
-        full_history = list(agent_grid_history.items()) + [(step_idx, (grid_y, grid_x))]
+    # # Draw trajectory — skip teleport steps
+    # if agent_grid_history and len(agent_grid_history) > 0:
+    #     full_history = list(agent_grid_history.items()) + [(step_idx, (grid_y, grid_x))]
 
-        for i in range(1, len(full_history)):
-            step_prev, (row_prev, col_prev) = full_history[i - 1]
-            step_curr, (row_curr, col_curr) = full_history[i]
+    #     for i in range(1, len(full_history)):
+    #         step_prev, (row_prev, col_prev) = full_history[i - 1]
+    #         step_curr, (row_curr, col_curr) = full_history[i]
 
 
             
-            if teleport_step_flags and teleport_step_flags.get(step_curr, False):
-                continue 
+    #         if teleport_step_flags and teleport_step_flags.get(step_curr, False):
+    #             continue 
 
 
-            center_prev = (
-                col_prev * spacing_px - spacing_px // 2,
-                row_prev * spacing_px - spacing_px // 2
-            )
-            center_curr = (
-                col_curr * spacing_px - spacing_px // 2,
-                row_curr * spacing_px - spacing_px // 2
-            )
+    #         center_prev = (
+    #             col_prev * spacing_px - spacing_px // 2,
+    #             row_prev * spacing_px - spacing_px // 2
+    #         )
+    #         center_curr = (
+    #             col_curr * spacing_px - spacing_px // 2,
+    #             row_curr * spacing_px - spacing_px // 2
+    #         )
 
-            color = (0, 255, 0) if i == len(full_history) - 1 else (255, 0, 0)
-            cv2.line(map_vis, center_prev, center_curr, color=color, thickness=2)
-            cv2.circle(map_vis, center_prev, radius=3, color=(255, 0, 0), thickness=-1)
-            if i == len(full_history) - 1:
-                cv2.circle(map_vis, center_curr, radius=3, color=(255, 0, 0), thickness=-1)
+    #         color = (0, 255, 0) if i == len(full_history) - 1 else (255, 0, 0)
+    #         cv2.line(map_vis, center_prev, center_curr, color=color, thickness=2)
+    #         cv2.circle(map_vis, center_prev, radius=3, color=(255, 0, 0), thickness=-1)
+    #         if i == len(full_history) - 1:
+    #             cv2.circle(map_vis, center_curr, radius=3, color=(255, 0, 0), thickness=-1)
 
-    if show:
-        plt.figure(figsize=(8, 8))
-        plt.imshow(map_vis)
-        plt.title(f"Step {step_idx} — Agent @ ({x:.2f}, {y:.2f})")
-        plt.axis("off")
-        plt.tight_layout()
-        plt.show()
+    # if show:
+    #     plt.figure(figsize=(8, 8))
+    #     plt.imshow(map_vis)
+    #     plt.title(f"Step {step_idx} — Agent @ ({x:.2f}, {y:.2f})")
+    #     plt.axis("off")
+    #     plt.tight_layout()
+    #     plt.show()
 
-    if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        cv2.imwrite(save_path, map_vis)
+    # if save_path:
+    #     os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    #     cv2.imwrite(save_path, map_vis)
 
     return (grid_y, grid_x)

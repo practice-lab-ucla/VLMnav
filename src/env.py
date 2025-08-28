@@ -218,7 +218,9 @@ class Env:
 
 
 
-
+        print("the agent is stopping @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+        bfs_min = self.agent.best_bfs_min
+        print("Best BFS Min Score:", bfs_min)
 
         self.df.to_pickle(f'logs/{self.outer_run_name}/{self.inner_run_name}/{self.curr_run_name}/df_results.pkl')
         self.simWrapper.reset()

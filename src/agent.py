@@ -388,61 +388,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-                # 🚧 Guard: inside rewind queue, treat 0 as "rewind again" (only before backprop)
-                # if (not self.initiate_back_propagation) and (next_action == 0):
-                #     print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
-                #     self.step_rewind(self.tree_root_step_ndx, 0)
-
-                #     # Return a no-op this tick; next tick will teleport due to defer_rewind_to_root=True
-                #     no_op = PolarAction(0.0, 0.0)
-
-                #     raw_action_image = obs['color_sensor'].copy()
-                #     chosen_action_image = obs['color_sensor'].copy()
-                #     self._project_onto_image(
-                #         self.tree_root_a_final,
-                #         raw_action_image,
-                #         obs['agent_state'],
-                #         obs['agent_state'].sensor_states['color_sensor']
-                #     )
-                #     self._project_onto_image(
-                #         self.tree_root_a_final,
-                #         chosen_action_image,
-                #         obs['agent_state'],
-                #         obs['agent_state'].sensor_states['color_sensor'],
-                #         chosen_action=0
-                #     )
-
-                #     self.step_ndx += 1
-                #     return no_op, {
-                #         'step_metadata': {
-                #             'action_number': 0,  # handled as a rewind signal
-                #             'success': 1,
-                #             'score': 1.0,
-                #             'confident_score': [],
-                #             'top_actions': self.tree_action_queue.copy(),
-                #         },
-                #         'logging_data': {'note': 'QUEUE_TURNAROUND→REWIND_PARENT'},
-                #         'images': {
-                #             'color_sensor': raw_action_image,
-                #             'color_sensor_chosen': chosen_action_image
-                #         },
-                #         'a_final': self.tree_root_a_final
-                #     }
-                
-
-
-
-
-
-
-
-
-
-
-
                 agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
                 print(f"🛞 Converted to PolarAction: Distance = {agent_action.r}, Angle = {agent_action.theta:.5f}°")
 
@@ -609,7 +554,7 @@ class VLMNavAgent(Agent):
         # print("Maximized Minimum Score:", min_score)
 
 
-        if self.goal_reached and self.goal_grid_location is None:
+        if self.initiate_back_propagation and self.goal_grid_location is None:
             if self.step_ndx in self.agent_grid_history:
                 self.goal_grid_location = self.agent_grid_history[self.step_ndx]
                 print(f"🎯 Goal grid location captured at step {self.step_ndx}: {self.goal_grid_location}")
@@ -617,7 +562,8 @@ class VLMNavAgent(Agent):
                 print("⚠️ Warning: Cannot capture goal grid location — not found in agent_grid_history.")
 
 
-        if self.first_reach and self.goal_grid_location is not None:
+        # if self.first_reach and self.goal_grid_location is not None:
+        if self.initiate_back_propagation:
             print("📊 Grid Transitions with Adjusted Scores:")
             edges = self.generate_grid_edge_score_list_from_adjusted()
             for r1, c1, r2, c2, score in edges:
@@ -761,6 +707,12 @@ class VLMNavAgent(Agent):
 
 
 
+        # If we're already backtracking and standing on a node of the best BFS path,
+        # skip re-traversing it—rewind to explore a different branch.
+        if self.goal_reached:
+            print("goal reached^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+        else:
+            print("goal not reached^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 
 
 
@@ -904,12 +856,6 @@ class VLMNavAgent(Agent):
         # Current grid (row, col) for this step
         
 
-        # If we're already backtracking and standing on a node of the best BFS path,
-        # skip re-traversing it—rewind to explore a different branch.
-        if self.goal_reached:
-            print("goal reached^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-        else:
-            print("goal not reached^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 
 
         if (self.initiate_back_propagation and curr_grid in self.best_bfs_path and not self.goal_reached and not self.tree_action_queue):
@@ -973,11 +919,6 @@ class VLMNavAgent(Agent):
 
 
         ################# only do step rewind when we are NOT backtracking ##################
-        # if not self.initiate_back_propagation:
-        #     self.step_rewind(self.step_ndx, selected_action)
-
-        # if (not self.initiate_back_propagation) and (selected_action == 0) and (self.step_ndx > 0):
-        #     self.step_rewind(self.step_ndx, selected_action)
 
         if (not self.initiate_back_propagation) and (selected_action == 0):
             self.step_rewind(self.step_ndx, selected_action)
@@ -1107,12 +1048,21 @@ class VLMNavAgent(Agent):
         if selected_action != 0:
             return
 
-        # If we’re at initial pose or step 0, no-op
-        if self._at_state(self._initial_pose) or current_step <= 0:
+        # # If we’re at initial pose or step 0, no-op
+        # if self._at_state(self._initial_pose) or current_step <= 0:
+        #     return
+
+
+        parent_step = self.parent_by_step.get(current_step)
+
+
+        if parent_step is None:
+
+            print("the agent is at the initial state +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+            # No parent to rewind to (e.g., step 0 root). Do nothing here so the
+            # caller will execute the actual turn-around action (action 0) in-place.
             return
 
-        # --- NEW: strict one-edge rewind target ---
-        parent_step = self.parent_by_step.get(current_step)
 
         print(f"🌳 [step_rewind] Rewinding from step {current_step} → parent step {parent_step}========================================")
         if parent_step is None:
