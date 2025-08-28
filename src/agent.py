@@ -198,6 +198,8 @@ class VLMNavAgent(Agent):
         self.last_root_action = None                # last sibling dispatched from current root
 
 
+        self.parent_by_step = {}
+
 
 
 
@@ -378,6 +380,67 @@ class VLMNavAgent(Agent):
                 for i, (r, theta) in enumerate(self.tree_root_a_final):
                     print(f"  Action {i+1}: distance = {r:.3f} m, angle = {theta:.3f} rad ({np.degrees(theta):.2f}°)")
 
+                print(f"📌 Next queued model index: {next_action}")
+
+
+
+
+
+
+
+
+
+
+                # 🚧 Guard: inside rewind queue, treat 0 as "rewind again" (only before backprop)
+                # if (not self.initiate_back_propagation) and (next_action == 0):
+                #     print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
+                #     self.step_rewind(self.tree_root_step_ndx, 0)
+
+                #     # Return a no-op this tick; next tick will teleport due to defer_rewind_to_root=True
+                #     no_op = PolarAction(0.0, 0.0)
+
+                #     raw_action_image = obs['color_sensor'].copy()
+                #     chosen_action_image = obs['color_sensor'].copy()
+                #     self._project_onto_image(
+                #         self.tree_root_a_final,
+                #         raw_action_image,
+                #         obs['agent_state'],
+                #         obs['agent_state'].sensor_states['color_sensor']
+                #     )
+                #     self._project_onto_image(
+                #         self.tree_root_a_final,
+                #         chosen_action_image,
+                #         obs['agent_state'],
+                #         obs['agent_state'].sensor_states['color_sensor'],
+                #         chosen_action=0
+                #     )
+
+                #     self.step_ndx += 1
+                #     return no_op, {
+                #         'step_metadata': {
+                #             'action_number': 0,  # handled as a rewind signal
+                #             'success': 1,
+                #             'score': 1.0,
+                #             'confident_score': [],
+                #             'top_actions': self.tree_action_queue.copy(),
+                #         },
+                #         'logging_data': {'note': 'QUEUE_TURNAROUND→REWIND_PARENT'},
+                #         'images': {
+                #             'color_sensor': raw_action_image,
+                #             'color_sensor_chosen': chosen_action_image
+                #         },
+                #         'a_final': self.tree_root_a_final
+                #     }
+                
+
+
+
+
+
+
+
+
+
 
 
                 agent_action = self._action_number_to_polar(next_action, list(self.tree_root_a_final))
@@ -428,6 +491,15 @@ class VLMNavAgent(Agent):
 
 
                 self.step_ndx += 1
+
+
+
+                if (not self.initiate_back_propagation) and (next_action == 0):
+                    print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
+                    self.step_rewind(self.tree_root_step_ndx, 0)
+
+
+
                 return agent_action, metadata
             
 
@@ -598,16 +670,39 @@ class VLMNavAgent(Agent):
 
         should_rewind_to_sibling = False
 
+
+
+
+
+
+
+
+
+
+
         if self.initiate_back_propagation:
-            if selected_action == 0:
-                print("🔁 Turn-around detected → will rewind to next sibling")
-                should_rewind_to_sibling = True
-            elif self.goal_reached:
-                print("🔁 Goal reached on this branch → will rewind to next sibling")
-                should_rewind_to_sibling = True
-            elif curr_grid is not None and curr_grid in self.best_bfs_path:
-                print(f"🔁 On BFS best-path grid {curr_grid} → will rewind to next sibling")
-                should_rewind_to_sibling = True
+            # evaluate all rewind triggers first
+            trigger_rewind = (
+                selected_action == 0
+                or self.goal_reached
+                or (curr_grid is not None and curr_grid in self.best_bfs_path)
+            )
+
+            if trigger_rewind:
+                if self.first_reach:
+                    # First reach → do NOT rewind yet
+                    print("✅ First reach detected — skipping rewind this time")
+                    self.tree_action_queue = []
+                    self.first_reach = False
+                else:
+                    # Any subsequent time → do rewind
+                    if selected_action == 0:
+                        print("🔁 Turn-around detected → will rewind to next sibling")
+                    elif self.goal_reached:
+                        print("🔁 Goal reached on this branch → will rewind to next sibling")
+                    else:
+                        print(f"🔁 On BFS best-path grid {curr_grid} → will rewind to next sibling")
+                    should_rewind_to_sibling = True
 
         if should_rewind_to_sibling:
             self.defer_rewind_to_root = True
@@ -615,6 +710,11 @@ class VLMNavAgent(Agent):
 
 
 
+
+
+
+
+        
 
 
 
@@ -956,6 +1056,21 @@ class VLMNavAgent(Agent):
 
 
 
+
+
+
+
+
+    def _find_step_by_grid(self, grid_cell, upto_step):
+        if grid_cell is None:
+            return None
+        for s in range(upto_step - 1, -1, -1):
+            log_s = self.step_action_log_history_dict.get(s)
+            if log_s and log_s.get("grid_current") == grid_cell:
+                return s
+        return None
+
+
     def _at_state(self, target_state, pos_eps: float = 0.02, ang_eps_deg: float = 2.0) -> bool:
         """
         True iff current simulator agent pose matches target_state within tolerances.
@@ -987,67 +1102,49 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     def step_rewind(self, current_step: int, selected_action: int):
+        # Only trigger on action 0
+        if selected_action != 0:
+            return
 
-        print("triggerrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr")
-        """
-        Rewind policy:
+        # If we’re at initial pose or step 0, no-op
+        if self._at_state(self._initial_pose) or current_step <= 0:
+            return
 
-        1) Before reaching the goal, if the model outputs a turnaround (action 0) and current_step > 0,
-           we rewind ONE step.
-        2) After rewinding one step, try the next-highest untried sibling at that step.
-        3) If every sibling at a step causes an immediate (depth==1) turnaround, the next rewind
-           jumps back to that step’s ORIGINAL root (not root-1, since root-1 was the option you took to arrive here).
-        4) If the agent had advanced multiple steps into an option, a rewind moves back exactly ONE step,
-           not all the way to the session root.
-        """
+        # --- NEW: strict one-edge rewind target ---
+        parent_step = self.parent_by_step.get(current_step)
 
-        # Helper to build a queue from a chosen root step using tried-set; excludes 0 by policy.
+        print(f"🌳 [step_rewind] Rewinding from step {current_step} → parent step {parent_step}========================================")
+        if parent_step is None:
+            parent_step = current_step - 1  # conservative fallback
+
+        # Build queue and restore pose from the *parent* step
         def build_queue_from_root(root_step: int):
             ranking = self.step_action_ranking_dict.get(root_step)
             prev_log = self.step_action_log_history_dict.get(root_step)
             if ranking is None or prev_log is None:
-                return None, None, None  # cannot build
+                return None, None, None
 
-            # Never retry actions already tried at this root, and never queue 0 (turnaround)
             tried = self.tried_actions_by_step.get(root_step, set())
-            remaining = [i for i, _ in ranking if i not in tried and i != 0]  # 🚫 exclude 0
+            # remaining = [i for i, _ in ranking if i not in tried and i != 0]
+            remaining = [i for i, _ in ranking if i not in tried]
 
-            # ---- Restore pose from the step log ----
             from habitat_sim import AgentState
             import numpy as np
             from habitat_sim.utils.common import quat_from_coeffs
 
             restored = AgentState()
             restored.position = np.array(prev_log['position'], dtype=np.float32)
-
-            q = np.array(prev_log['rotation'], dtype=np.float32)  # [w, x, y, z]
-            norm = np.linalg.norm(q)
-            if norm == 0:
-                q = np.array([1, 0, 0, 0], dtype=np.float32)
-            else:
-                q = q / norm
+            q = np.array(prev_log['rotation'], dtype=np.float32)     # [w, x, y, z]
+            q = q / (np.linalg.norm(q) or 1.0)
             q_xyzw = np.array([q[1], q[2], q[3], q[0]], dtype=np.float32)
             restored.rotation = quat_from_coeffs(q_xyzw)
 
-            # ---- Rebuild a_final (exclude 0 here too) and a per-index score log ----
             actions = prev_log.get('actions') or []
             sorted_actions = sorted(actions, key=lambda a: int(a.get('index', 0)))
-            a_final = [(a['distance'], a['angle']) for a in sorted_actions
-                       if int(a.get('index', 0)) != 0]
+            a_final = [(a['distance'], a['angle']) for a in sorted_actions if int(a.get('index', 0)) != 0]
+            # a_final = [(a['distance'], a['angle']) for a in sorted_actions]
+
 
             max_idx = 0
             for a in actions:
@@ -1062,113 +1159,27 @@ class VLMNavAgent(Agent):
 
             return restored, a_final, (remaining, scores_by_index)
 
-
-
-        # If we are at step 0, do nothing special; allow the model to proceed.
-        # if current_step <= 0:
-        #     return
-
-        if self._at_state(self._initial_pose):
-            print("⛔ At initial pose — skip rewind$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
-            return
-
-        # Case A: Not already in a "rewind session"
-        starting_rewind = (self.tree_action_queue is None) or (len(self.tree_action_queue) == 0)
-        if self.tree_root_state is None or starting_rewind:
-            root_step = max(current_step - 1, 0)
-            restored, a_final, payload = build_queue_from_root(root_step)
-            if restored is None:
-                restored, a_final, payload = build_queue_from_root(current_step)
-            if restored is None or not payload:
-                return
-
-            remaining, scores_by_index = payload
-            if not remaining:
-                # 🚨 If no non-zero siblings remain, deepen the rewind one step
-                parent_root = max(root_step - 1, 0)
-                restored, a_final, payload = build_queue_from_root(parent_root)
-                if restored is None or not payload or not payload[0]:
-                    self.terminate_after_local = True
-                    return
-                remaining, scores_by_index = payload
-                root_step = parent_root
-
-            self.tree_root_state = restored
-            self.tree_root_a_final = a_final
-            self.tree_action_queue = remaining
-            self.tree_root_score_log = scores_by_index
-            self.tree_root_step_ndx = root_step
-            self.rewind_origin_step = root_step
-            self.immediate_turnaround_by_root.setdefault(root_step, set())
-            self.defer_rewind_to_root = True
-            return
-
-        # Case B: Already rewinding and another turnaround occurred
-        root_idx = self.tree_root_step_ndx if self.tree_root_step_ndx is not None else (current_step - 1)
-        depth_from_root = max(0, current_step - root_idx)
-
-        if depth_from_root > 1:
-            new_root = max(current_step - 1, 0)
-        else:
-            if getattr(self, "last_root_action", None) is not None:
-                self.immediate_turnaround_by_root.setdefault(root_idx, set()).add(self.last_root_action)
-            new_root = root_idx
-
-        restored, a_final, payload = build_queue_from_root(new_root)
+        restored, a_final, payload = build_queue_from_root(parent_step)
         if restored is None or not payload:
-            parent_root = max(new_root - 1, 0)
-            restored, a_final, payload = build_queue_from_root(parent_root)
-            if restored is None or not payload or not payload[0]:
-                self.terminate_after_local = True
-                return
-            new_root = parent_root
+            # No data for parent; safely bail
+            self.terminate_after_local = True
+            return
 
         remaining, scores_by_index = payload
         if not remaining:
-            # 🚨 escalate if only turnaround was left
-            parent_root = max(new_root - 1, 0)
-            restored, a_final, payload = build_queue_from_root(parent_root)
-            if restored is None or not payload or not payload[0]:
-                self.terminate_after_local = True
-                return
-            remaining, scores_by_index = payload
-            new_root = parent_root
+            # Nothing else to try at parent — still behave safely
+            self.terminate_after_local = True
+            return
 
+        # Set rewind root to the parent step and teleport there on next tick
         self.tree_root_state = restored
         self.tree_root_a_final = a_final
         self.tree_action_queue = remaining
         self.tree_root_score_log = scores_by_index
-        self.tree_root_step_ndx = new_root
+        self.tree_root_step_ndx = parent_step
+        self.rewind_origin_step = parent_step
+        self.immediate_turnaround_by_root.setdefault(parent_step, set())
         self.defer_rewind_to_root = True
-        self.last_root_action = None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1447,6 +1458,8 @@ class VLMNavAgent(Agent):
         self.immediate_turnaround_by_root = {}
         self.last_root_action = None
 
+        self.parent_by_step = {}
+
 
 
         ####################################################### initialize a csv file that saves the RRT score ###########################3
@@ -1566,7 +1579,7 @@ class VLMNavAgent(Agent):
                 (self.cfg['max_action_dist'], 0.28 * np.pi),
                 (self.cfg['max_action_dist'], 0.36 * np.pi)
             ]
-        else:
+        else: 
             a_initial = self._navigability(obs)
 
             # print(f"debug here ################################### 1",a_initial)
@@ -2032,6 +2045,15 @@ class VLMNavAgent(Agent):
             grid_from = [prev_grid[0], prev_grid[1]]
         else:
             grid_from = None
+
+
+
+
+        parent = self._find_step_by_grid(grid_from, step_number)
+        if parent is None:
+            # fallback: linear parent if present
+            parent = step_number - 1 if step_number - 1 in self.step_action_log_history_dict else None
+        self.parent_by_step[step_number] = parent
 
 
 
@@ -2561,6 +2583,8 @@ class ObjectNavAgent(VLMNavAgent):
 
 
             print(11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111)
+
+
 
 
         # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
