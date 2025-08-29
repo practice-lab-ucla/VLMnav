@@ -579,11 +579,17 @@ class VLMNavAgent(Agent):
 
             self.best_bfs_path = set(path)
             self.best_bfs_min = min_score
-            print(f"🔻 BFS bottleneck score before stopping: {self.best_bfs_min:.3f}")
+
+
+            if self.best_bfs_min is not None:
+                print(f"🔻 BFS bottleneck score before stopping: {self.best_bfs_min:.3f}")
+            else:
+                print("🔻 BFS bottleneck score before stopping: None")
+
 
         else:
             print("⏳ Awaiting goal reach... BFS not triggered yet.")
-
+        
 
 
         ##### calculate number of turns for warning purpose #####

@@ -10,6 +10,7 @@ import habitat_sim
 
 import pandas as pd
 import numpy as np
+import csv
 
 from PIL import Image
 from simWrapper import PolarAction, SimWrapper
@@ -17,6 +18,7 @@ from agent import *
 from utils import *
 from scipy.spatial.transform import Rotation as R
 from generate_map_fh import extract_and_save_topdown_map
+
 
 
 def get_quat_from_heading_angle(heading_angle_deg):
@@ -52,6 +54,17 @@ class Env:
         self.simWrapper: SimWrapper = None
         self.num_episodes = 0
         self._initialize_experiment()
+
+        # === per-worker CSV setup ===
+        self.worker_id = self.cfg['instance']  # unique per worker (--instance)
+        self.worker_csv = f'logs/worker_{self.worker_id}.csv'
+        os.makedirs(os.path.dirname(self.worker_csv), exist_ok=True)
+        if not os.path.exists(self.worker_csv):
+            with open(self.worker_csv, 'w', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(['episode_ndx', 'scene_id', 'bfs_min'])
+        # ============================
+
 
     def _initialize_agent(self, cfg: dict):
         """Initializes the agent for the environment."""
@@ -221,6 +234,18 @@ class Env:
         print("the agent is stopping @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
         bfs_min = self.agent.best_bfs_min
         print("Best BFS Min Score:", bfs_min)
+        # append a row to this worker's CSV
+        scene_id = getattr(self.simWrapper, 'scene_id', '')
+        with open(self.worker_csv, 'a', newline='') as f:
+            csv.writer(f).writerow([self.current_episode_ndx, scene_id, bfs_min])
+
+
+
+
+
+
+
+
 
         self.df.to_pickle(f'logs/{self.outer_run_name}/{self.inner_run_name}/{self.curr_run_name}/df_results.pkl')
         self.simWrapper.reset()
