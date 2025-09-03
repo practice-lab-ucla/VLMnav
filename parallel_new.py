@@ -5,7 +5,7 @@ from multiprocessing import Pool
 
 # ========================== CONFIG ==========================
 NUM_INSTANCES = 1000             # How many partition the dataset split into 
-MAX_PARALLEL = 15               # How many to actually run
+MAX_PARALLEL = 5               # How many to actually run
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
 EPISODES_PER_INSTANCE = 1     # Episodes each instance should run
 MAX_STEPS = 25                 # Max steps per episode

@@ -341,6 +341,9 @@ class VLMNavAgent(Agent):
                 next_action = self.tree_action_queue.pop(0)
 
 
+                self._link_parent_for_next_step(self.tree_root_step_ndx)
+
+
                 root_ndx = getattr(self, "tree_root_step_ndx", None)
                 if root_ndx is not None:
                     if root_ndx not in self.tried_actions_by_step:
@@ -999,52 +1002,59 @@ class VLMNavAgent(Agent):
 
 
 
+    def _link_parent_for_next_step(self, parent_step):
+        """Record who the NEXT step's parent is (works for normal and rewind flows)."""
+        child = self.step_ndx + 1
+        self.parent_by_step[child] = parent_step
+        print(f"👪 [parent-link] next step {child} ← parent {parent_step}")
+
+    def _determine_parent_step(self, step_number):
+        """Pure parent lookup: never uses grid/location."""
+        if step_number in self.parent_by_step:
+            return self.parent_by_step[step_number]
+        prev = step_number - 1
+        return prev if prev in self.step_action_log_history_dict else None
 
 
 
 
+    # def _find_step_by_grid(self, grid_cell, upto_step):
+    #     if grid_cell is None:
+    #         return None
+    #     for s in range(upto_step - 1, -1, -1):
+    #         log_s = self.step_action_log_history_dict.get(s)
+    #         if log_s and log_s.get("grid_current") == grid_cell:
+    #             return s
+    #     return None
+
+
+    # def _at_state(self, target_state, pos_eps: float = 0.02, ang_eps_deg: float = 2.0) -> bool:
+    #     """
+    #     True iff current simulator agent pose matches target_state within tolerances.
+    #     """
+    #     import numpy as np, math
+    #     from habitat_sim.utils.common import quat_to_angle_axis
+
+    #     curr = self.simWrapper.sim.get_agent(0).get_state()
+
+    #     # position check
+    #     if np.linalg.norm(curr.position - target_state.position) > pos_eps:
+    #         return False
+
+    #     # orientation check by comparing minimal angles
+    #     ang_curr, _ = quat_to_angle_axis(curr.rotation)
+    #     ang_tgt, _ = quat_to_angle_axis(target_state.rotation)
+
+    #     print(f"[DEBUG] curr: ang={ang_curr:.4f} ")
+    #     print(f"[DEBUG] tgt : ang={ang_tgt:.4f} ")
 
 
 
+    #     def _norm_angle(a):
+    #         a = abs(a) % (2 * math.pi)
+    #         return a if a <= math.pi else (2 * math.pi - a)
 
-
-    def _find_step_by_grid(self, grid_cell, upto_step):
-        if grid_cell is None:
-            return None
-        for s in range(upto_step - 1, -1, -1):
-            log_s = self.step_action_log_history_dict.get(s)
-            if log_s and log_s.get("grid_current") == grid_cell:
-                return s
-        return None
-
-
-    def _at_state(self, target_state, pos_eps: float = 0.02, ang_eps_deg: float = 2.0) -> bool:
-        """
-        True iff current simulator agent pose matches target_state within tolerances.
-        """
-        import numpy as np, math
-        from habitat_sim.utils.common import quat_to_angle_axis
-
-        curr = self.simWrapper.sim.get_agent(0).get_state()
-
-        # position check
-        if np.linalg.norm(curr.position - target_state.position) > pos_eps:
-            return False
-
-        # orientation check by comparing minimal angles
-        ang_curr, _ = quat_to_angle_axis(curr.rotation)
-        ang_tgt, _ = quat_to_angle_axis(target_state.rotation)
-
-        print(f"[DEBUG] curr: ang={ang_curr:.4f} ")
-        print(f"[DEBUG] tgt : ang={ang_tgt:.4f} ")
-
-
-
-        def _norm_angle(a):
-            a = abs(a) % (2 * math.pi)
-            return a if a <= math.pi else (2 * math.pi - a)
-
-        return abs(_norm_angle(ang_curr) - _norm_angle(ang_tgt)) <= math.radians(ang_eps_deg)
+    #     return abs(_norm_angle(ang_curr) - _norm_angle(ang_tgt)) <= math.radians(ang_eps_deg)
 
 
 
@@ -1836,6 +1846,9 @@ class VLMNavAgent(Agent):
             response_dict = self._eval_response(response)
             step_metadata['action_number'] = int(response_dict['action'])
 
+            self._link_parent_for_next_step(self.step_ndx)
+
+
             if self.step_ndx not in self.tried_actions_by_step:
                 self.tried_actions_by_step[self.step_ndx] = set()
             self.tried_actions_by_step[self.step_ndx].add(step_metadata['action_number'])
@@ -2005,11 +2018,16 @@ class VLMNavAgent(Agent):
 
 
 
-        parent = self._find_step_by_grid(grid_from, step_number)
-        if parent is None:
-            # fallback: linear parent if present
-            parent = step_number - 1 if step_number - 1 in self.step_action_log_history_dict else None
+        # parent = self._find_step_by_grid(grid_from, step_number)
+        # if parent is None:
+        #     # fallback: linear parent if present
+        #     parent = step_number - 1 if step_number - 1 in self.step_action_log_history_dict else None
+        # self.parent_by_step[step_number] = parent
+
+
+        parent = self._determine_parent_step(step_number)
         self.parent_by_step[step_number] = parent
+
 
 
 
