@@ -20,9 +20,17 @@ def visualize_topdown_map_with_agent(
     Visualizes a top-down map with agent's trajectory.
     Prevents connecting steps with teleportation (rewind).
     """
-    print("Teleport Step Flags:")
-    for step, is_teleport in sorted(teleport_step_flags.items()):
-        print(f"  Step {step}: {'TELEPORT' if is_teleport else 'normal'}")
+
+
+    ### debug test if a step is teleport ###
+    # print("Teleport Step Flags:")
+    # for step, is_teleport in sorted(teleport_step_flags.items()):
+    #     print(f"  Step {step}: {'TELEPORT' if is_teleport else 'normal'}")
+    
+    
+    
+    
+    
     # Load map
     topdown_map = np.load(map_path)
     map_vis = (1 - topdown_map) * 255

@@ -199,6 +199,7 @@ class VLMNavAgent(Agent):
 
 
         self.parent_by_step = {}
+        self.swipping_back = False
 
 
 
@@ -227,6 +228,8 @@ class VLMNavAgent(Agent):
     def step(self, obs: dict):
         agent_state: habitat_sim.AgentState = obs['agent_state']
         self.last_obs = obs.copy() 
+
+        print(f"🟢 Executing step ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ {self.step_ndx}")
 
         # print("📍 Agent Position:", agent_state.position)
         # print("🧭 Agent Rotation (Quaternion):", agent_state.rotation)
@@ -300,9 +303,9 @@ class VLMNavAgent(Agent):
             self.agent_grid_history[self.step_ndx] = grid_row_col
 
 
-            print("📘 Agent Grid History:")
-            for step, (r, c) in sorted(self.agent_grid_history.items()):
-                print(f"  Step {step}: Grid cell (row={r}, col={c})")
+            # print("📘 Agent Grid History:")
+            # for step, (r, c) in sorted(self.agent_grid_history.items()):
+            #     print(f"  Step {step}: Grid cell (row={r}, col={c})")
 
 
 
@@ -342,6 +345,7 @@ class VLMNavAgent(Agent):
 
 
                 self._link_parent_for_next_step(self.tree_root_step_ndx)
+                print("trigger 1 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
 
 
                 root_ndx = getattr(self, "tree_root_step_ndx", None)
@@ -366,9 +370,9 @@ class VLMNavAgent(Agent):
                 self.adjusted_score[self.step_ndx] = score
 
 
-                print("🧮 Adjusted Score History:")
-                for step, adj_score in self.adjusted_score.items():
-                    print(f"  Step {step}: Adjusted Score = {adj_score}")
+                # print("🧮 Adjusted Score History:")
+                # for step, adj_score in self.adjusted_score.items():
+                #     print(f"  Step {step}: Adjusted Score = {adj_score}")
 
 
 
@@ -442,9 +446,37 @@ class VLMNavAgent(Agent):
 
 
 
+                # if (not self.initiate_back_propagation) and (next_action == 0):
+                #     print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
+                #     self.step_rewind(self.tree_root_step_ndx, 0)
+
+
                 if (not self.initiate_back_propagation) and (next_action == 0):
-                    print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
-                    self.step_rewind(self.tree_root_step_ndx, 0)
+                    if self.swipping_back:
+                        if self.swipe_back_all_steps():
+                            # Do NOT execute action 0. We just queued a new global swipe target.
+                            # Return a no-op step; next tick will teleport & dispatch the queued action.
+                            return None, {
+                                'step_metadata': {'action_number': -3, 'success': 1},
+                                'logging_data': {'note': 'GLOBAL_SWIPE_BACK_REQUEUE_ON_0'},
+                                'a_final': self.tree_root_a_final or [],
+                                'images': {
+                                    # reuse the images we already prepared above
+                                    'color_sensor': metadata['images']['color_sensor'],
+                                    'color_sensor_chosen': metadata['images']['color_sensor_chosen'],
+                                }
+                            }
+                        else:
+                            self.overall_stop = True
+                            return PolarAction.stop, {
+                                'step_metadata': {'action_number': -1, 'success': 1},
+                                'logging_data': {'note': 'GLOBAL_SWIPE_BACK_EXHAUSTED'},
+                                'a_final': [],
+                                'images': {'color_sensor': obs['color_sensor']}
+                            }
+                    else:
+                        print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
+                        self.step_rewind(self.tree_root_step_ndx, 0)
 
 
 
@@ -481,9 +513,9 @@ class VLMNavAgent(Agent):
         
 
 
-        print("📘 Agent Grid History:")
-        for step, (r, c) in sorted(self.agent_grid_history.items()):
-            print(f"  Step {step}: Grid cell (row={r}, col={c})")
+        # print("📘 Agent Grid History:")
+        # for step, (r, c) in sorted(self.agent_grid_history.items()):
+        #     print(f"  Step {step}: Grid cell (row={r}, col={c})")
 
 
 
@@ -503,21 +535,25 @@ class VLMNavAgent(Agent):
 
 
 
-        if getattr(self, "terminate_after_local", False):
-            # Clear rewind state
-            self.tree_action_queue = []
-            self.defer_rewind_to_root = False
-            self.tree_root_state = None
-            self.tree_root_step_ndx = None
+        # if getattr(self, "terminate_after_local", False):
+        #     # Clear rewind state
+        #     self.tree_action_queue = []
+        #     self.defer_rewind_to_root = False
+        #     self.tree_root_state = None
+        #     self.tree_root_step_ndx = None
 
-            # Return STOP and mark failure
-            return PolarAction.stop, {
-                "step_metadata": {"action_number": -1, "success": 1},
-                "logging_data": {"note": "LOCAL_REWIND_EXHAUSTED"},
-                "a_final": [],
-                "images": {"color_sensor": obs["color_sensor"]}
-            }
+        #     # Return STOP and mark failure
+        #     return PolarAction.stop, {
+        #         "step_metadata": {"action_number": -1, "success": 1},
+        #         "logging_data": {"note": "LOCAL_REWIND_EXHAUSTED"},
+        #         "a_final": [],
+        #         "images": {"color_sensor": obs["color_sensor"]}
+        #     }
         
+
+
+
+        # only before goal / before back-propagation
 
 
 
@@ -539,9 +575,9 @@ class VLMNavAgent(Agent):
             print(f"model stopped skipping adjusted score.")
 
 
-        print("🧮 Adjusted Score History:")
-        for step, adj_score in self.adjusted_score.items():
-            print(f"  Step {step}: Adjusted Score = {adj_score}")
+        # print("🧮 Adjusted Score History:")
+        # for step, adj_score in self.adjusted_score.items():
+        #     print(f"  Step {step}: Adjusted Score = {adj_score}")
 
 
 
@@ -929,8 +965,164 @@ class VLMNavAgent(Agent):
 
         ################# only do step rewind when we are NOT backtracking ##################
 
+        # if (not self.initiate_back_propagation) and (selected_action == 0):
+        #     self.step_rewind(self.step_ndx, selected_action)
+
+
         if (not self.initiate_back_propagation) and (selected_action == 0):
-            self.step_rewind(self.step_ndx, selected_action)
+            if self.swipping_back:
+                # We are back-swiping: pick another global best untried option
+                if not self.swipe_back_all_steps():
+                    self.overall_stop = True
+                    return PolarAction.stop, {
+                        'step_metadata': {'action_number': -1, 'success': 1},
+                        'logging_data': {'note': 'GLOBAL_SWIPE_BACK_EXHAUSTED'},
+                        'a_final': [],
+                        'images': {'color_sensor': obs['color_sensor']}
+                    }
+            else:
+                self.step_rewind(self.step_ndx, selected_action)
+
+
+
+
+
+
+
+
+
+
+
+
+        selected_action = metadata['step_metadata']['action_number']
+        # If we're in global back-swipe mode (pre-goal), keep swiping until the goal is reached
+        if self.swipping_back and not self.initiate_back_propagation and not getattr(self, "defer_rewind_to_root", False) and selected_action == 0:
+            if self.swipe_back_all_steps():
+                base = metadata['images'].get('color_sensor', obs['color_sensor'])
+                raw_action_image = base.copy()
+                chosen_action_image = base.copy()
+
+                self._project_onto_image(
+                    metadata.get('a_final', []),
+                    raw_action_image,
+                    obs['agent_state'],
+                    obs['agent_state'].sensor_states['color_sensor'],
+                )
+                self._project_onto_image(
+                    metadata.get('a_final', []),
+                    chosen_action_image,
+                    obs['agent_state'],
+                    obs['agent_state'].sensor_states['color_sensor'],
+                    chosen_action=metadata['step_metadata'].get('action_number')
+                )
+
+                self.step_ndx += 1
+                return None, {
+                    'step_metadata': {'action_number': -3, 'success': 1},
+                    'logging_data': {'note': 'GLOBAL_SWIPE_BACK_INITIATED'},
+                    'a_final': metadata.get('a_final', []),
+                    'images': {
+                        'color_sensor': raw_action_image,
+                        'color_sensor_chosen': chosen_action_image
+                    }
+                }
+
+            else:
+                self.overall_stop = True
+                return [PolarAction.stop], {
+                    'step_metadata': {'action_number': -1, 'success': 1},
+                    'logging_data': {'note': 'GLOBAL_SWIPE_BACK_EXHAUSTED'},
+                    'a_final': [],
+                    'images': {'color_sensor': obs['color_sensor']}
+                }
+
+
+
+        if (not self.initiate_back_propagation) and getattr(self, "terminate_after_local", False ) and not self.swipping_back:
+            # Clear local rewind bookkeeping
+            self.tree_action_queue = []
+            self.defer_rewind_to_root = False
+            self.tree_root_state = None
+            self.tree_root_step_ndx = None
+
+            # Enable global back-swipe mode
+            self.swipping_back = True
+            print("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT")
+            print("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT")
+            print("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT")
+
+            # Try a global swipe immediately
+            if self.swipe_back_all_steps():
+                # Prepare a no-op return; next tick will teleport & run queued action
+                base = metadata['images'].get('color_sensor', obs['color_sensor'])
+                raw_action_image = base.copy()
+                chosen_action_image = base.copy()
+
+                # Draw ALL available actions on both images
+                self._project_onto_image(
+                    metadata.get('a_final', []),
+                    raw_action_image,
+                    obs['agent_state'],
+                    obs['agent_state'].sensor_states['color_sensor'],
+                )
+                self._project_onto_image(
+                    metadata.get('a_final', []),
+                    chosen_action_image,
+                    obs['agent_state'],
+                    obs['agent_state'].sensor_states['color_sensor'],
+                    chosen_action=metadata['step_metadata'].get('action_number')  # may be None
+                )
+
+                self.step_ndx += 1
+                return None, {
+                    'step_metadata': {'action_number': -3, 'success': 1},
+                    'logging_data': {'note': 'GLOBAL_SWIPE_BACK_CONTINUE'},
+                    'a_final': metadata.get('a_final', []),
+                    'images': {
+                        'color_sensor': raw_action_image,
+                        'color_sensor_chosen': chosen_action_image
+                    }
+                }
+
+            else:
+                # Nothing left anywhere → stop
+                self.overall_stop = True
+                return PolarAction.stop, {
+                    "step_metadata": {"action_number": -1, "success": 1},
+                    "logging_data": {"note": "GLOBAL_SWIPE_BACK_EXHAUSTED"},
+                    "a_final": [],
+                    "images": {"color_sensor": obs["color_sensor"]}
+                }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -949,6 +1141,9 @@ class VLMNavAgent(Agent):
             print(f"🟢 self.goal_reached = {self.goal_reached}")
 
             if self.goal_reached:
+                
+                self.swipping_back = False
+
                 chosen_action_image = obs['color_sensor'].copy()
                 metadata['a_final'] = []  # 🛠️ Safely include empty a_final
                 self._project_onto_image([], chosen_action_image, agent_state,
@@ -1059,6 +1254,105 @@ class VLMNavAgent(Agent):
 
 
 
+
+
+
+
+    def swipe_back_all_steps(self):
+        """
+        Scan ALL previous steps for the highest-score UNTRIED non-zero action.
+        Teleport to that step and queue exactly that action.
+        Returns True if prepared; False if no candidates exist.
+        """
+        from habitat_sim import AgentState
+        import numpy as np
+
+        # newest → oldest
+        for back_step in range(self.step_ndx, -1, -1):
+            log = self.step_action_log_history_dict.get(back_step)
+            if not log or not log.get("actions"):
+                continue
+
+            tried = self.tried_actions_by_step.get(back_step, set())
+
+            # Collect untried, non-turnaround candidates with scores
+            actions = sorted(log["actions"], key=lambda a: int(a.get("index", 0)))
+            candidates = []
+            max_idx = 0
+            for a in actions:
+                idx = int(a.get("index", 0))
+                max_idx = max(max_idx, idx)
+                if idx == 0:
+                    continue
+                if idx in tried:
+                    continue
+                sc = a.get("adjusted")
+                if sc is None:
+                    sc = a.get("score", 0.0)
+                candidates.append((idx, float(sc)))
+
+            if not candidates:
+                continue
+
+            # Pick the single best untried option
+            candidates.sort(key=lambda t: t[1], reverse=True)
+            best_idx, _ = candidates[0]
+
+            # Rebuild agent state at that step (same quat convention as rewind)
+            restored = AgentState()
+            restored.position = np.array(log["position"], dtype=np.float32)
+            q = np.array(log["rotation"], dtype=np.float32)  # [w, x, y, z]
+            q = q / (np.linalg.norm(q) or 1.0)
+            q_xyzw = np.array([q[1], q[2], q[3], q[0]], dtype=np.float32)
+            restored.rotation = quat_from_coeffs(q_xyzw)
+
+            # Build a_final (exclude turnaround 0)
+            a_final = [(a["distance"], a["angle"]) for a in actions if int(a.get("index", 0)) != 0]
+
+            # Score log aligned by index (debug)
+            scores_by_index = [None] * (max_idx + 1)
+            for a in actions:
+                idx = int(a.get("index", 0))
+                scores_by_index[idx] = a.get("adjusted", a.get("score"))
+
+            # Arm the rewind root so top-of-step() will teleport and execute best_idx
+            self.tree_root_state = restored
+            self.tree_root_a_final = a_final
+            self.tree_action_queue = [best_idx]
+            self.tree_root_score_log = scores_by_index
+            self.tree_root_step_ndx = back_step
+            self.rewind_origin_step = back_step
+            self.immediate_turnaround_by_root.setdefault(back_step, set())
+            self.defer_rewind_to_root = True
+
+            # # Make sure the next step is parent-linked to this root
+            # self._link_parent_for_next_step(back_step)
+
+
+            return True
+
+        return False
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     def step_rewind(self, current_step: int, selected_action: int):
         # Only trigger on action 0
         if selected_action != 0:
@@ -1094,6 +1388,14 @@ class VLMNavAgent(Agent):
             tried = self.tried_actions_by_step.get(root_step, set())
             # remaining = [i for i, _ in ranking if i not in tried and i != 0]
             remaining = [i for i, _ in ranking if i not in tried]
+
+
+            # remaining = [i for i, _ in ranking if i not in tried and i != 0]
+            # if 0 not in tried:
+            #     remaining.append(0)
+
+
+
 
             from habitat_sim import AgentState
             import numpy as np
@@ -1425,6 +1727,8 @@ class VLMNavAgent(Agent):
         self.last_root_action = None
 
         self.parent_by_step = {}
+        self.swipping_back = False
+
 
 
 
@@ -1847,6 +2151,8 @@ class VLMNavAgent(Agent):
             step_metadata['action_number'] = int(response_dict['action'])
 
             self._link_parent_for_next_step(self.step_ndx)
+
+            print("trigger 222222222222222222222222222222222222222222222222222222222222")
 
 
             if self.step_ndx not in self.tried_actions_by_step:

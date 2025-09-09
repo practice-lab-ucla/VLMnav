@@ -5,10 +5,10 @@ from multiprocessing import Pool
 
 # ========================== CONFIG ==========================
 NUM_INSTANCES = 1000             # How many partition the dataset split into 
-MAX_PARALLEL = 5               # How many to actually run
+MAX_PARALLEL = 40               # How many to actually run
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
 EPISODES_PER_INSTANCE = 1     # Episodes each instance should run
-MAX_STEPS = 25                 # Max steps per episode
+MAX_STEPS = 150                 # Max steps per episode
 PORT = 2000                   # Aggregator server port (optional)
 CONFIG = "ObjectNav"          # Config file name (without .yaml)
 SCRIPT_PATH = "scripts/main.py"  # Path to your main.py
@@ -57,4 +57,41 @@ if __name__ == "__main__":
     elapsed = end_time - start_time
     minutes, seconds = divmod(elapsed.total_seconds(), 60)
     print(f"✅ Selected instances completed. Total runtime: {int(minutes)} min {int(seconds)} sec")
+
+
+    # === Post-run: combine per-worker CSVs into one file ===
+    try:
+        from pathlib import Path
+        import csv
+
+        logs_dir = Path("logs")
+        combined_out = Path(LOG_DIR) / "combined_workers.csv"
+        combined_out.parent.mkdir(parents=True, exist_ok=True)
+
+        worker_files = sorted(logs_dir.glob("worker_*.csv"))
+        if not worker_files:
+            print("[combine] No worker_*.csv files found in 'logs/'. Skipping merge.")
+        else:
+            rows = []
+            for f in worker_files:
+                with f.open(newline="", encoding="utf-8") as fp:
+                    reader = csv.DictReader(fp)
+                    for r in reader:
+                        rows.append({
+                            "worker_id": f.stem.split("_")[-1],
+                            "episode_ndx": r.get("episode_ndx", ""),
+                            "scene_id": r.get("scene_id", ""),
+                            "bfs_min": r.get("bfs_min", ""),
+                        })
+
+            # Write combined file
+            with combined_out.open("w", newline="", encoding="utf-8") as fp:
+                writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "bfs_min"])
+                writer.writeheader()
+                writer.writerows(rows)
+
+            print(f"[combine] Wrote {combined_out}")
+    except Exception as e:
+        print(f"[combine] ERROR while combining worker CSVs: {e}")
+
 
