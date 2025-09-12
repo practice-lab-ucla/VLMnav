@@ -12,9 +12,9 @@ from pathlib import Path
 
 
 NUM_INSTANCES = 500             # How many partition the dataset split into 
-MAX_PARALLEL = 40               # How many to actually run
+MAX_PARALLEL = 5               # How many to actually run
 EPISODES_PER_INSTANCE = 2     # Episodes each instance should run
-MAX_STEPS = 10                # Max steps per episode
+MAX_STEPS = 10              # Max steps per episode
 
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
 
@@ -43,6 +43,7 @@ def run_instance(instance_id):
     cmd = (
         f"RUN_ID={timestamp} "
         f"WORKER_LOG_DIR={WORKER_LOG_DIR} "
+        f"EPISODE_LOG_DIR={LOG_DIR} "             
         f"CUDA_VISIBLE_DEVICES={gpu_id} "
         f"{PYTHON_BIN} {SCRIPT_PATH} "
         f"--config {CONFIG} "
@@ -57,7 +58,10 @@ def run_instance(instance_id):
     with open(log_file_path, "w") as log_file:
         print(f"🚀 Launching instance {instance_id} on GPU {gpu_id}, logging to {log_file_path}")
         subprocess.run(cmd, shell=True, stdout=log_file, stderr=log_file)
+    print(f"✅ Instance {instance_id} finished, logs in {log_file_path}")
 
+
+    
 if __name__ == "__main__":
     start_time = datetime.now()
     instance_ids_to_run = list(range(min(MAX_PARALLEL, NUM_INSTANCES)))

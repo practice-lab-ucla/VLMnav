@@ -32,6 +32,10 @@ def modified_bfs(edges, goal):
     start = edges[0][0], edges[0][1]
     # goal = edges[-1][2], edges[-1][3]
 
+    ################################################# handle if the start = goal #######################################3
+    if start == goal:
+        return [start], 1.0
+
     # Modified BFS: track path and minimum score so far
     queue = deque([(start, [start], float('inf'))])
     visited = {}
