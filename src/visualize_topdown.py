@@ -10,7 +10,8 @@ def visualize_topdown_map_with_agent(
     map_origin: tuple,
     step_idx: int = 0,
     meters_per_pixel: float = 0.005,
-    grid_spacing_m: float = 0.5,
+    grid_spacing_m: float = 0.7,
+    # grid_spacing_m: float = 5,
     save_path: str = None,
     show: bool = True,
     agent_grid_history: dict = None,  # {step_idx: (row, col)}
@@ -45,6 +46,13 @@ def visualize_topdown_map_with_agent(
     spacing_px = int(grid_spacing_m / meters_per_pixel)
     grid_x = x_px // spacing_px + 1
     grid_y = y_px // spacing_px + 1
+
+
+
+
+
+
+    # ##################
 
     # # Draw agent position
     # cv2.circle(map_vis, (x_px, y_px), radius=5, color=(0, 0, 255), thickness=-1)

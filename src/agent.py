@@ -567,6 +567,11 @@ class VLMNavAgent(Agent):
 
 
 
+        print(f"[Step {self.step_ndx}] Global Semantic Score (GSV)AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa: {gsv:.3f}")
+
+
+
+
         ### at the last step there is not step score because the goal is reached ###
         if self.step_ndx in self.step_score_history_dict:
             combined_score = self.step_score_history_dict[self.step_ndx] * gsv
@@ -581,10 +586,10 @@ class VLMNavAgent(Agent):
 
 
 
-        # print("📊 Grid Transitions with Adjusted Scores:")
-        # edges = self.generate_grid_edge_score_list_from_adjusted()
-        # for r1, c1, r2, c2, score in edges:
-        #     print(f"({r1}, {c1})-({r2}, {c2}): {score}")
+        print("📊 Grid Transitions with Adjusted Scores:")
+        edges = self.generate_grid_edge_score_list_from_adjusted()
+        for r1, c1, r2, c2, score in edges:
+            print(f"({r1}, {c1})-({r2}, {c2}): {score}")
 
 
         # path, min_score = modified_bfs(edges)
@@ -773,7 +778,11 @@ class VLMNavAgent(Agent):
             # backtrack_success, a_final = self.rewind_and_explore_from_log_state(self.min_score, self.start_ndx)
 
             min_thresh = self.best_bfs_min
-            print(f"🔁 Initiating backtrack with BFS min = {min_thresh:.3f} (fallback to adjusted min if None)")
+
+            if min_thresh is None:
+                min_thresh = 1.0
+
+            print(f"🔁 Initiating backtrack with BFS min = {min_thresh:.3f} ")
             print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             self.start_ndx = max(self.step_ndx - 1, 0)
             backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
@@ -1639,9 +1648,13 @@ class VLMNavAgent(Agent):
             print("Target Found")
             return agent_action  
         
-        # discourage_distance = 0.9
+        discourage_ratio = 0.5
         
-        adjusted_distance = agent_action.r * confidence_score
+    
+        adjusted_distance = agent_action.r * confidence_score * discourage_ratio
+
+
+
         final_distance = min(adjusted_distance, max_action_dist_calibration)
 
         print(f"[VLMNavAgent] Original distance: {agent_action.r}, Adjusted distance: {final_distance}")
@@ -2059,9 +2072,9 @@ class VLMNavAgent(Agent):
                         thetas.add(theta_i)
 
 
-                # print("Thetas after final filter:")
-                # for t in sorted(thetas):
-                #     print(f"  θ = {np.rad2deg(t):.2f}°")
+
+
+
     
         if len(out) == 0:
             # if no explored actions or no explore bias
@@ -2081,15 +2094,77 @@ class VLMNavAgent(Agent):
                     smallest_theta = filtered[i][1]
 
 
+
+
+
+        # longest = max(filtered, key=lambda x: x[0])
+        # longest_theta = longest[1]
+        # smallest_theta = longest[1]
+        # longest_ndx = filtered.index(longest)
+        # out.append([min(longest[0], clip_mag), longest[1], longest[2]])
+        
+        # for i in range(longest_ndx+1, len(filtered)):
+        #     if filtered[i][1] - longest_theta > min_angle:
+        #         out.append([min(filtered[i][0], clip_mag), filtered[i][1], filtered[i][2]])
+        #         longest_theta = filtered[i][1]
+        # for i in range(longest_ndx-1, -1, -1):
+        #     if smallest_theta - filtered[i][1] > min_angle:
+        #         out.append([min(filtered[i][0], clip_mag), filtered[i][1], filtered[i][2]])
+        #         smallest_theta = filtered[i][1]
+
+
+
+
+
+
+
+
+
         if (out == [] or max(out, key=lambda x: x[0])[0] < self.cfg['min_action_dist']) and (self.step_ndx - self.turned) < self.cfg['turn_around_cooldown']:
             return self._get_default_arrows()
         
         out.sort(key=lambda x: x[1])
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         ############### here the function is only filtering out the action NOT changing it##################
         original_distance_dict = dict(a_initial)  
         # Restore original distances before returning
+
+
+
+        min_dist = self.cfg.get('min_action_dist')
+        out = [
+            [mag, theta, e]
+            for mag, theta, e in out
+            if original_distance_dict.get(theta, mag) >= min_dist
+        ]
+
+        # If everything got filtered out, keep existing cooldown fallback
+        if (not out) and (self.step_ndx - self.turned) < self.cfg['turn_around_cooldown']:
+            return self._get_default_arrows()
+
+
+
+
+
+
         return [(original_distance_dict.get(theta, mag), theta) for mag, theta, _ in out]
 
     
@@ -2170,8 +2245,12 @@ class VLMNavAgent(Agent):
             # Get raw confidence scores from response
             conf_scores_raw = response_dict.get('confident_score', [])
 
+            print(f"🔎 Raw confident scores (from VLM) RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRr: {conf_scores_raw}")
+
             # Normalize them
             conf_scores_norm = VLMNavAgent.normalize_scores(conf_scores_raw)
+
+            print(f"✅ Normalized confident scores NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN: {conf_scores_norm}")
 
             # Update step metadata
             step_metadata['confident_score'] = conf_scores_norm
@@ -3048,17 +3127,50 @@ class ObjectNavAgent(VLMNavAgent):
         if prompt_type == 'stopping':
 
 
+            # stopping_prompt = (
+            #                 f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
+            #                 f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
+            #                 f"First, describe what you see in the image and whether a {goal} is present. "
+            #                 f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
+            #                 f"Third, based on what is visible in the image, provide a score between 0.0 and 1.0 representing how much this scene is worth exploring further. "
+            #                 f"This is called the global semantic score. A score close to 1.0 means the scene appears promising and informative, suggesting that moving forward or scanning the area may help locate the {goal}. "
+            #                 f"A score close to 0.0 means the scene appears uninformative, irrelevant, or unlikely to contain useful paths or cues. "
+            #                 f"Format your response in JSON format:\n"
+            #                 f"{{'done': <1 or 0>, 'global_semantic_score': <float between 0.0 and 1.0>}}"
+            #             )
+            
             stopping_prompt = (
                             f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
                             f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
                             f"First, describe what you see in the image and whether a {goal} is present. "
                             f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
-                            f"Third, based on what is visible in the image, provide a score between 0.0 and 1.0 representing how much this scene is worth exploring further. "
-                            f"This is called the global semantic score. A score close to 1.0 means the scene appears promising and informative, suggesting that moving forward or scanning the area may help locate the {goal}. "
-                            f"A score close to 0.0 means the scene appears uninformative, irrelevant, or unlikely to contain useful paths or cues. "
-                            f"Format your response in JSON format:\n"
-                            f"{{'done': <1 or 0>, 'global_semantic_score': <float between 0.0 and 1.0>}}"
+                            f"Third, Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], "
+                            f"named global_semantic_score. This score MUST depend only on the current environment, "
+                            f"NOT on whether the goal is present or visible. High scores mean the scene has open, "
+                            f"traversable, informative paths (e.g., clear corridors, multiple branches, large visible free space). "
+                            f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions."
+                            f"Important rules for global_semantic_score:"
+                            f"Do NOT increase the score just because the {goal} is visible."
+                            f"Base it on openness, navigability cues, line of sight, and apparent paths."
+                            f"Examples: \n"
+                            f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+                            f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+                            f"0.3 to 0.7 → the view has a clear outlet or large navigable space "
+                            f"(the higher the score, the clearer and more navigable it looks)\n"
+                            f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+                            f"Respond in JSON:\n"
+                            f"{{'done': <1 or 0>, 'global_semantic_score': <float 0.0 to 1.0>}}"
                         )
+
+
+
+
+
+
+
+
+
+
             return stopping_prompt
         
 
@@ -3077,6 +3189,22 @@ class ObjectNavAgent(VLMNavAgent):
             
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
+            # action_prompt = (
+            #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
+            #     f"Use your prior knowledge about where items are typically located within a home. "
+            #     f"There are {num_actions} actions that you can choose from. "
+            #     f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
+            #     f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
+            #     f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
+            #     f"Second, tell me which general direction you should go in. "
+            #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
+            #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
+            #     f"'action' must be an integer not a string. "
+            #     f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
+            #     f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
+            #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
+            # )
+
             action_prompt = (
                 f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
                 f"Use your prior knowledge about where items are typically located within a home. "
@@ -3087,11 +3215,61 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Second, tell me which general direction you should go in. "
                 f"Lastly, explain which action achieves that best and return it as JSON in the format: "
                 f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-                f"'action' must be an integer not a string. "
+                f"The 'confident_score' list represents probabilities for each action "
+                f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
+                f"Do NOT normalize or force the scores to sum to 1. "
                 f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-                f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
                 f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
             )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            # action_prompt = (
+            #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
+            #     f"Use your prior knowledge about where items are typically located within a home. "
+            #     f"There are {num_actions} actions that you can choose from. "
+            #     f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
+            #     f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
+            #     f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
+            #     f"Second, tell me which general direction you should go in. "
+            #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
+            #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
+            #     f"'action' must be an integer not a string. "
+            #     f"Generate exactly {num_actions} scores, one for each action shown. "
+            #     f"Each s_i is an independent confidence value in [0, 1] for action i. "
+            #     f"Higher scores mean the action is more likely to bring you closer to the {goal.upper()} or otherwise more promising. "
+            #     f"Lower scores mean the action is less likely to help reach the goal, blocked, or less useful. "
+            #     f"Do NOT normalize or force the scores to sum to 1. "
+            #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
+            #     f"If two actions are visually/geometrically similar (e.g., small angle difference or targeting the same opening/corridor), "
+            #     f"their scores should be close (e.g., difference ≤ 0.10)."
+            # )
+
+            
             return action_prompt
 
         raise ValueError('Prompt type must be stopping, pivot, no_project, or action')
@@ -3100,3 +3278,6 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 ######################### score cannot be zero ###############################
+
+
+

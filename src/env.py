@@ -18,6 +18,7 @@ from agent import *
 from utils import *
 from scipy.spatial.transform import Rotation as R
 from generate_map_fh import extract_and_save_topdown_map
+from datetime import datetime
 
 
 
@@ -56,9 +57,19 @@ class Env:
         self._initialize_experiment()
 
         # === per-worker CSV setup ===
-        self.worker_id = self.cfg['instance']  # unique per worker (--instance)
-        self.worker_csv = f'logs/worker_{self.worker_id}.csv'
-        os.makedirs(os.path.dirname(self.worker_csv), exist_ok=True)
+        run_id = os.environ.get("RUN_ID")
+        worker_log_dir = os.environ.get("WORKER_LOG_DIR")
+
+        if not run_id:
+            from datetime import datetime
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Prefer explicit env var; otherwise default to logs/worker_log_<RUN_ID>
+        self.run_log_dir = worker_log_dir or f"logs/worker_log_{run_id}"
+        os.makedirs(self.run_log_dir, exist_ok=True)
+
+        self.worker_id = self.cfg['instance']
+        self.worker_csv = os.path.join(self.run_log_dir, f'worker_{self.worker_id}.csv')
         if not os.path.exists(self.worker_csv):
             with open(self.worker_csv, 'w', newline='') as f:
                 w = csv.writer(f)
@@ -139,7 +150,7 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        # episode_ndx = 3
+        # episode_ndx = 8
 
 
         obs = self._initialize_episode(episode_ndx)
@@ -353,7 +364,7 @@ class GOATEnv(Env):
     task = 'GOAT'
 
     def _initialize_experiment(self):
-        """
+        """def run_instance(instance_id):
         Initializes the experiment by setting up the dataset split, scene configuration, and goals.
         """
         self.split = 'val' if 'val' in self.cfg['split'] else 'train'

@@ -2,13 +2,22 @@ import subprocess
 import os
 from datetime import datetime
 from multiprocessing import Pool
+from pathlib import Path
 
 # ========================== CONFIG ==========================
-NUM_INSTANCES = 1000             # How many partition the dataset split into 
+# NUM_INSTANCES = 1000             # How many partition the dataset split into 
+# MAX_PARALLEL = 40               # How many to actually run
+# EPISODES_PER_INSTANCE = 1     # Episodes each instance should run
+# MAX_STEPS = 150                 # Max steps per episode
+
+
+NUM_INSTANCES = 500             # How many partition the dataset split into 
 MAX_PARALLEL = 40               # How many to actually run
+EPISODES_PER_INSTANCE = 2     # Episodes each instance should run
+MAX_STEPS = 10                # Max steps per episode
+
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
-EPISODES_PER_INSTANCE = 1     # Episodes each instance should run
-MAX_STEPS = 150                 # Max steps per episode
+
 PORT = 2000                   # Aggregator server port (optional)
 CONFIG = "ObjectNav"          # Config file name (without .yaml)
 SCRIPT_PATH = "scripts/main.py"  # Path to your main.py
@@ -19,6 +28,8 @@ PYTHON_BIN = "/home/qizhao/miniconda3/envs/vlm_nav/bin/python"  # Absolute path 
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 LOG_DIR = f"logs/parallel_run_{timestamp}"
 os.makedirs(LOG_DIR, exist_ok=True)
+WORKER_LOG_DIR = f"logs/worker_log_{timestamp}"
+os.makedirs(WORKER_LOG_DIR, exist_ok=True)
 
 print("🔧 Launch Configuration:")
 print(f"- Number of Total Instances: {NUM_INSTANCES}")
@@ -30,6 +41,8 @@ print(f"- Log Directory: {LOG_DIR}\n")
 def run_instance(instance_id):
     gpu_id = instance_id % NUM_GPU
     cmd = (
+        f"RUN_ID={timestamp} "
+        f"WORKER_LOG_DIR={WORKER_LOG_DIR} "
         f"CUDA_VISIBLE_DEVICES={gpu_id} "
         f"{PYTHON_BIN} {SCRIPT_PATH} "
         f"--config {CONFIG} "
@@ -68,7 +81,15 @@ if __name__ == "__main__":
         combined_out = Path(LOG_DIR) / "combined_workers.csv"
         combined_out.parent.mkdir(parents=True, exist_ok=True)
 
-        worker_files = sorted(logs_dir.glob("worker_*.csv"))
+        # worker_files = sorted(logs_dir.glob("worker_*.csv"))
+        # worker_files = sorted(Path(LOG_DIR).glob("worker_*.csv"))
+
+
+        combined_out = Path(WORKER_LOG_DIR) / "combined_workers.csv"
+        worker_files = sorted(Path(WORKER_LOG_DIR).glob("worker_*.csv"))
+
+
+
         if not worker_files:
             print("[combine] No worker_*.csv files found in 'logs/'. Skipping merge.")
         else:
