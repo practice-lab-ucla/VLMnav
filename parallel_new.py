@@ -11,10 +11,10 @@ from pathlib import Path
 # MAX_STEPS = 150                 # Max steps per episode
 
 
-NUM_INSTANCES = 500             # How many partition the dataset split into 
-MAX_PARALLEL = 5               # How many to actually run
-EPISODES_PER_INSTANCE = 2     # Episodes each instance should run
-MAX_STEPS = 10              # Max steps per episode
+NUM_INSTANCES = 250             # How many partition the dataset split into 
+MAX_PARALLEL = 25               # How many to actually run
+EPISODES_PER_INSTANCE = 4    # Episodes each instance should run
+MAX_STEPS = 150              # Max steps per episode
 
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
 
@@ -61,7 +61,7 @@ def run_instance(instance_id):
     print(f"✅ Instance {instance_id} finished, logs in {log_file_path}")
 
 
-    
+
 if __name__ == "__main__":
     start_time = datetime.now()
     instance_ids_to_run = list(range(min(MAX_PARALLEL, NUM_INSTANCES)))

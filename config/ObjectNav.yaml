@@ -13,12 +13,22 @@ agent_cfg:
   vlm_score_threshold: 0.5
 
 
+
+
+  meters_per_pixel: 0.005
+  grid_spacing_m: 0.7
+
+  
+
+
+
+
+
   # Calibrate using VLM. If this is higher, less result will be clipped
   max_action_dist_calibration: 1.7
 
   max_action_dist: 1.7
   # max_action_dist: 1.7 # clip action by a fixed number
-  # min_action_dist: 0.5 # clip action by a fixed number
   min_action_dist: 0.8 # clip action by a fixed number
 
 
@@ -29,7 +39,12 @@ agent_cfg:
 
   stopping_action_dist: 1.3 # length of actions after the agent calls stop
   # stopping_action_dist: 1.7 # 
-  default_action: 0.2 # how far forward to move if the VLM's chosen action is invalid
+
+  # default_action: 0.2 # how far forward to move if the VLM's chosen action is invalid
+  default_action: 0.0
+
+
+
   spacing_ratio: 360 # ratio of FOV to theta_delta
   hard_spacing: 0.349066 # force 20 degree difference between each proposed action
   # hard_spacing: 0.3
@@ -48,9 +63,10 @@ agent_cfg:
     model_cls: ChatGPTVLM
     model_kwargs:
       # model: gemini-1.5-flash-001
-      model: gpt-4o-mini 
       # model: gpt-5
-      # model: gpt-5-nano
+
+      # model: gpt-4o-mini 
+      model: gpt-5-nano
 
 
 

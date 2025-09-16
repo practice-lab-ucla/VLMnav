@@ -150,13 +150,16 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        # episode_ndx = 8
+        # episode_ndx = 38
 
 
         obs = self._initialize_episode(episode_ndx)
         self.current_episode_ndx = episode_ndx 
 
         logging.info(f'\n===================STARTING RUN: {self.curr_run_name} ===================\n')
+        print(f"🚀########################################### Starting Episode {episode_ndx}             ###########################################")
+
+
         for _ in range(self.cfg['max_steps']):
             try:
 
