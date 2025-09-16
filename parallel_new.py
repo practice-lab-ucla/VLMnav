@@ -11,10 +11,10 @@ from pathlib import Path
 # MAX_STEPS = 150                 # Max steps per episode
 
 
-NUM_INSTANCES = 250             # How many partition the dataset split into 
-MAX_PARALLEL = 25               # How many to actually run
-EPISODES_PER_INSTANCE = 4    # Episodes each instance should run
-MAX_STEPS = 150              # Max steps per episode
+NUM_INSTANCES = 200             # How many partition the dataset split into 
+MAX_PARALLEL = 40               # How many to actually run
+EPISODES_PER_INSTANCE = 5    # Episodes each instance should run
+MAX_STEPS = 250              # Max steps per episode
 
 NUM_GPU = 1                    # Number of GPUs available (set to 1 if only one GPU)
 

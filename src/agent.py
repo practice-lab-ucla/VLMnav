@@ -1751,7 +1751,7 @@ class VLMNavAgent(Agent):
             print("Target Found")
             return agent_action  
         
-        discourage_ratio = 0.5
+        discourage_ratio = 0.75
         
     
         adjusted_distance = agent_action.r * confidence_score * discourage_ratio
@@ -2522,7 +2522,8 @@ class VLMNavAgent(Agent):
 
         log_entry = {
             "step": step_number,
-            "position": [round(float(p), 2) for p in pos],
+            # "position": [round(float(p), 2) for p in pos],
+            "position": [round(float(p), 6) for p in pos],
             "rotation": [float(rot.w), float(rot.x), float(rot.y), float(rot.z)],
             "grid_current": grid_current,
             "grid_from": grid_from,
