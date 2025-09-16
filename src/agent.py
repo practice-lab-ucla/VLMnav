@@ -1751,10 +1751,14 @@ class VLMNavAgent(Agent):
             print("Target Found")
             return agent_action  
         
-        discourage_ratio = 0.75
+        calibrate_distance = self.cfg.get('discourage_ratio')
+
+        # print(f"discourage ratio {calibrate_distance}LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL")
+        
+        # discourage_ratio = 0.75
         
     
-        adjusted_distance = agent_action.r * confidence_score * discourage_ratio
+        adjusted_distance = agent_action.r * confidence_score * calibrate_distance
 
 
 

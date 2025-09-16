@@ -18,10 +18,10 @@ agent_cfg:
   meters_per_pixel: 0.005
   grid_spacing_m: 0.7
 
-  
 
 
 
+  discourage_ratio: 0.6 
 
 
   # Calibrate using VLM. If this is higher, less result will be clipped
