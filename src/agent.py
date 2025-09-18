@@ -466,31 +466,36 @@ class VLMNavAgent(Agent):
 
 
                 if (not self.initiate_back_propagation) and (next_action == 0):
-                    if self.swipping_back:
-                        if self.swipe_back_all_steps():
-                            # Do NOT execute action 0. We just queued a new global swipe target.
-                            # Return a no-op step; next tick will teleport & dispatch the queued action.
-                            return None, {
-                                'step_metadata': {'action_number': -3, 'success': 1},
-                                'logging_data': {'note': 'GLOBAL_SWIPE_BACK_REQUEUE_ON_0'},
-                                'a_final': self.tree_root_a_final or [],
-                                'images': {
-                                    # reuse the images we already prepared above
-                                    'color_sensor': metadata['images']['color_sensor'],
-                                    'color_sensor_chosen': metadata['images']['color_sensor_chosen'],
-                                }
-                            }
-                        else:
-                            self.overall_stop = True
-                            return PolarAction.stop, {
-                                'step_metadata': {'action_number': -1, 'success': 1},
-                                'logging_data': {'note': 'GLOBAL_SWIPE_BACK_EXHAUSTED'},
-                                'a_final': [],
-                                'images': {'color_sensor': obs['color_sensor']}
-                            }
+
+                    if self.swipping_back and getattr(self, "tree_root_step_ndx", None) == 0:
+                        pass 
+
                     else:
-                        print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
-                        self.step_rewind(self.tree_root_step_ndx, 0)
+                        if self.swipping_back:
+                            if self.swipe_back_all_steps():
+                                # Do NOT execute action 0. We just queued a new global swipe target.
+                                # Return a no-op step; next tick will teleport & dispatch the queued action.
+                                return None, {
+                                    'step_metadata': {'action_number': -3, 'success': 1},
+                                    'logging_data': {'note': 'GLOBAL_SWIPE_BACK_REQUEUE_ON_0'},
+                                    'a_final': self.tree_root_a_final or [],
+                                    'images': {
+                                        # reuse the images we already prepared above
+                                        'color_sensor': metadata['images']['color_sensor'],
+                                        'color_sensor_chosen': metadata['images']['color_sensor_chosen'],
+                                    }
+                                }
+                            else:
+                                self.overall_stop = True
+                                return PolarAction.stop, {
+                                    'step_metadata': {'action_number': -1, 'success': 1},
+                                    'logging_data': {'note': 'GLOBAL_SWIPE_BACK_EXHAUSTED'},
+                                    'a_final': [],
+                                    'images': {'color_sensor': obs['color_sensor']}
+                                }
+                        else:
+                            print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
+                            self.step_rewind(self.tree_root_step_ndx, 0)
 
 
 
@@ -1109,44 +1114,48 @@ class VLMNavAgent(Agent):
         selected_action = metadata['step_metadata']['action_number']
         # If we're in global back-swipe mode (pre-goal), keep swiping until the goal is reached
         if self.swipping_back and not self.initiate_back_propagation and not getattr(self, "defer_rewind_to_root", False) and selected_action == 0:
-            if self.swipe_back_all_steps():
-                base = metadata['images'].get('color_sensor', obs['color_sensor'])
-                raw_action_image = base.copy()
-                chosen_action_image = base.copy()
-
-                self._project_onto_image(
-                    metadata.get('a_final', []),
-                    raw_action_image,
-                    obs['agent_state'],
-                    obs['agent_state'].sensor_states['color_sensor'],
-                )
-                self._project_onto_image(
-                    metadata.get('a_final', []),
-                    chosen_action_image,
-                    obs['agent_state'],
-                    obs['agent_state'].sensor_states['color_sensor'],
-                    chosen_action=metadata['step_metadata'].get('action_number')
-                )
-
-                self.step_ndx += 1
-                return None, {
-                    'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'GLOBAL_SWIPE_BACK_INITIATED'},
-                    'a_final': metadata.get('a_final', []),
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-
+            if getattr(self, "tree_root_step_ndx", None) == 0:
+                pass  # allow; do NOT re-sweep here
+            
             else:
-                self.overall_stop = True
-                return [PolarAction.stop], {
-                    'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {'note': 'GLOBAL_SWIPE_BACK_EXHAUSTED'},
-                    'a_final': [],
-                    'images': {'color_sensor': obs['color_sensor']}
-                }
+                if self.swipe_back_all_steps():
+                    base = metadata['images'].get('color_sensor', obs['color_sensor'])
+                    raw_action_image = base.copy()
+                    chosen_action_image = base.copy()
+
+                    self._project_onto_image(
+                        metadata.get('a_final', []),
+                        raw_action_image,
+                        obs['agent_state'],
+                        obs['agent_state'].sensor_states['color_sensor'],
+                    )
+                    self._project_onto_image(
+                        metadata.get('a_final', []),
+                        chosen_action_image,
+                        obs['agent_state'],
+                        obs['agent_state'].sensor_states['color_sensor'],
+                        chosen_action=metadata['step_metadata'].get('action_number')
+                    )
+
+                    self.step_ndx += 1
+                    return None, {
+                        'step_metadata': {'action_number': -3, 'success': 1},
+                        'logging_data': {'note': 'GLOBAL_SWIPE_BACK_INITIATED'},
+                        'a_final': metadata.get('a_final', []),
+                        'images': {
+                            'color_sensor': raw_action_image,
+                            'color_sensor_chosen': chosen_action_image
+                        }
+                    }
+
+                else:
+                    self.overall_stop = True
+                    return [PolarAction.stop], {
+                        'step_metadata': {'action_number': -1, 'success': 1},
+                        'logging_data': {'note': 'GLOBAL_SWIPE_BACK_EXHAUSTED'},
+                        'a_final': [],
+                        'images': {'color_sensor': obs['color_sensor']}
+                    }
 
 
 
@@ -1391,10 +1400,14 @@ class VLMNavAgent(Agent):
             actions = sorted(log["actions"], key=lambda a: int(a.get("index", 0)))
             candidates = []
             max_idx = 0
+            allow_zero_here = (back_step == 0)
             for a in actions:
                 idx = int(a.get("index", 0))
                 max_idx = max(max_idx, idx)
-                if idx == 0:
+                # if idx == 0:
+                #     continue
+                # Allow 0 only at root (step 0)
+                if idx == 0 and not allow_zero_here:
                     continue
                 if idx in tried:
                     continue
@@ -1418,8 +1431,13 @@ class VLMNavAgent(Agent):
             q_xyzw = np.array([q[1], q[2], q[3], q[0]], dtype=np.float32)
             restored.rotation = quat_from_coeffs(q_xyzw)
 
-            # Build a_final (exclude turnaround 0)
+            # # Build a_final (exclude turnaround 0)
+            # a_final = [(a["distance"], a["angle"]) for a in actions if int(a.get("index", 0)) != 0]
+
+            # Build a_final for projection; keep excluding 0 so indices stay aligned
+            # with your existing _action_number_to_polar contract (0 is special).
             a_final = [(a["distance"], a["angle"]) for a in actions if int(a.get("index", 0)) != 0]
+
 
             # Score log aligned by index (debug)
             scores_by_index = [None] * (max_idx + 1)

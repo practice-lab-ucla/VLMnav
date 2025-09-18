@@ -9,7 +9,12 @@ import math
 
 # ========================== CONFIG ==========================
 WAVE_SIZE = 10
-NUM_WAVES = 5
+NUM_WAVES = 10
+MAX_STEPS = 150
+
+# WAVE_SIZE = 1
+# NUM_WAVES = 1
+# MAX_STEPS = 5
 
 # Total environments in the whole pool (global count seen by main.py)
 TOTAL_ENVIRONMENTS = 1000
@@ -18,7 +23,8 @@ TOTAL_ENVIRONMENTS = 1000
 # For the first 50, leave at 0. For the next 50 later, set to 50, etc.
 START_INSTANCE = 0
 
-MAX_STEPS = 2
+
+
 NUM_GPU = 1
 
 PORT = 2000
