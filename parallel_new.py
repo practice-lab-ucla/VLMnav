@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 NUM_INSTANCES = 200             # How many partition the dataset split into 
-MAX_PARALLEL = 2               # How many to actually run
+MAX_PARALLEL = 40               # How many to actually run
 EPISODES_PER_INSTANCE = 5    # Episodes each instance should run
 MAX_STEPS = 250              # Max steps per episode
 
