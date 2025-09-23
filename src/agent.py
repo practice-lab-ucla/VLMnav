@@ -1611,6 +1611,9 @@ class VLMNavAgent(Agent):
                 print(f"+++++++++++ Step {back_step} has log in that step, it is a rewind state")
                 continue
 
+            actions = log.get("actions") or [] 
+
+
             try:
                 pos_vals = log["position"]
                 rot_vals = log["rotation"]
@@ -1629,11 +1632,28 @@ class VLMNavAgent(Agent):
             restored_state.rotation = quat_from_coeffs(q)
 
             # Extract adjusted scores and find retryable actions
-            adjusted_scores = {
-                a["index"]: a["adjusted"]
-                for a in log["actions"]
-                if a["index"] != 0  # skip turn-around
-            }
+            # adjusted_scores = {
+            #     a["index"]: a["adjusted"]
+            #     for a in log["actions"]
+            #     if a["index"] != 0  # skip turn-around
+            # }
+
+
+            try:
+                adjusted_scores = {
+                    int(a["index"]): a.get("adjusted")
+                    for a in actions
+                    if int(a["index"]) != 0
+                }
+            except Exception as e:
+                print(f"❌ Issue in actions at step {back_step}: {e}")
+                continue
+
+
+
+
+
+
 
             if not adjusted_scores:
                 print(f"⚠️ Step {back_step} has no actions to retry excluding turn arond")
