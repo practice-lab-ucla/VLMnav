@@ -198,7 +198,9 @@ class Env:
                     print("S")
                     print("S")
                     continue
-                
+            
+                agent_action = self.agent._adjust_action_distance(agent_action, 1.0)
+                print("111111111111111111111111111111111111111111111111111111111111111111111111111111111")
 
                 obs = self.simWrapper.step(agent_action)
 

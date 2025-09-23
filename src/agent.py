@@ -1253,7 +1253,7 @@ class VLMNavAgent(Agent):
         step_metadata = metadata['step_metadata']
 
 
-        confidence_score_for_distance = metadata['step_metadata'].get('score') 
+        
 
 
 
@@ -1281,11 +1281,14 @@ class VLMNavAgent(Agent):
 
 
 
-        # Adjust action distance based on confidence score
-        agent_action = self._adjust_action_distance(agent_action, confidence_score_for_distance)
-        # Print updated action details
-        print(f"Final Action Selected -> Distance: {agent_action.r}, Angle: {agent_action.theta}, Score: {confidence_score_for_distance}")
-        print("")
+        ######################################################################################
+        # confidence_score_for_distance = metadata['step_metadata'].get('score') 
+        # # Adjust action distance based on confidence score
+        # agent_action = self._adjust_action_distance(agent_action, confidence_score_for_distance)
+        # # Print updated action details
+        # print(f"Final Action Selected -> Distance: {agent_action.r}, Angle: {agent_action.theta}, Score: {confidence_score_for_distance}")
+        # print("")
+        ######################################################################################
 
         metadata['step_metadata'].update(self.cfg)
 
@@ -1302,9 +1305,6 @@ class VLMNavAgent(Agent):
         metadata['images']['color_sensor_chosen'] = chosen_action_image
 
         self.step_ndx += 1
-
-
-
 
 
 
