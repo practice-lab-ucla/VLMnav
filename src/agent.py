@@ -917,7 +917,9 @@ class VLMNavAgent(Agent):
                 print("action foundddddddddddddddddddddddddddddddddddd")
                 return None, {
                     'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'backtrack from best BFS node'},
+                    'logging_data': {'note': 'backtrack from best BFS node',
+                                     'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
+        '                               STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None)},
                     'a_final': a_final or [],
                     'images': {
                         'color_sensor': raw_action_image,
@@ -929,15 +931,18 @@ class VLMNavAgent(Agent):
                 self.overall_stop = True
                 return PolarAction.stop, {
                     'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {'note': 'backtracking exhausted from best-path node'},
+                    'logging_data': {
+                        'note': 'backtracking exhausted from best-path node',
+                        'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
+                        'STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None),
+                        
+                    },
                     'a_final': [],
                     'images': {
                         'color_sensor': raw_action_image,
                         'color_sensor_chosen': chosen_action_image
                     }
                 }
-
-
 
 
 
@@ -1063,7 +1068,12 @@ class VLMNavAgent(Agent):
                 self.overall_stop = True
                 return PolarAction.stop, {
                     'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {'note': 'backtracking exhausted from best-path node'},
+                    'logging_data': {
+                        'note': 'backtracking exhausted from best-path node',
+                        'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
+                        'STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None),
+                        
+                    },
                     'a_final': [],
                     'images': {
                         'color_sensor': raw_action_image,
@@ -1289,6 +1299,8 @@ class VLMNavAgent(Agent):
         # print(f"Final Action Selected -> Distance: {agent_action.r}, Angle: {agent_action.theta}, Score: {confidence_score_for_distance}")
         # print("")
         ######################################################################################
+
+
 
         metadata['step_metadata'].update(self.cfg)
 
@@ -2041,6 +2053,9 @@ class VLMNavAgent(Agent):
         """Determines if the agent should stop and prints confidence scores."""
         stopping_prompt = self._construct_prompt(goal, 'stopping')
         stopping_response = self.stoppingVLM.call(stopping_images, stopping_prompt)
+        self.last_stopping_response = stopping_response
+        self.last_stopping_prompt = stopping_prompt
+
         dct = self._eval_response(stopping_response)
 
         if 'done' in dct and 'global_semantic_score' in dct:
@@ -2470,6 +2485,8 @@ class VLMNavAgent(Agent):
             logging_data['CONFIDENT_SCORE'] = step_metadata.get('confident_score')
             logging_data['PROMPT'] = action_prompt
             logging_data['RESPONSE'] = response
+
+
 
 
 
@@ -3127,7 +3144,7 @@ class ObjectNavAgent(VLMNavAgent):
 
             return None, {
                 'step_metadata': {'action_number': -2, 'success': 1},
-                'logging_data': {'note': 'backtrack initiated'},
+                'logging_data': {'note': 'backtrack initiated'},  
                 'a_final': a_final,
                 'images': {'color_sensor': obs['color_sensor']}
             }
@@ -3137,35 +3154,28 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
+            # # ⛔ Only stop if backtrack failed
+            # print("🛑 No backtrack options — stopping agent.")
+            # step_metadata['action_number'] = -1
+            # agent_action = PolarAction.stop
 
 
-
-            # ⛔ Only stop if backtrack failed
-            print("🛑 No backtrack options — stopping agent.")
-            step_metadata['action_number'] = -1
-            agent_action = PolarAction.stop
+            # logging_data = {}
 
 
-            logging_data = {}
+            # print("stooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooop")
+
+            # logging_data['STOPPING RESPONSE'] = stopping_response
+            # metadata = {
+            #     'step_metadata': step_metadata,
+            #     'logging_data': logging_data,
+            #     'a_final': a_final,
+            #     'images': images
+
+            # }
 
 
-            print("stooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooop")
-
-            logging_data['STOPPING RESPONSE'] = stopping_response
-            metadata = {
-                'step_metadata': step_metadata,
-                'logging_data': logging_data,
-                'a_final': a_final,
-                'images': images
-
-            }
-
-
-
-
-
-
-            return agent_action, metadata
+            # return agent_action, metadata
 
 
 
@@ -3285,11 +3295,33 @@ class ObjectNavAgent(VLMNavAgent):
             #                 f"{{'done': <1 or 0>, 'global_semantic_score': <float between 0.0 and 1.0>}}"
             #             )
             
+            # stopping_prompt = (
+            #                 f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
+            #                 f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
+            #                 f"First, describe what you see in the image and whether a {goal} is present. "
+            #                 f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
+            #                 f"Third, Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], "
+            #                 f"named global_semantic_score. This score MUST depend only on the current environment, "
+            #                 f"NOT on whether the goal is present or visible. High scores mean the scene has open, "
+            #                 f"traversable, informative paths (e.g., clear corridors, multiple branches, large visible free space). "
+            #                 f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions."
+            #                 f"Important rules for global_semantic_score:"
+            #                 f"Do NOT increase the score just because the {goal} is visible."
+            #                 f"Base it on openness, navigability cues, line of sight, and apparent paths."
+            #                 f"Examples: \n"
+            #                 f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+            #                 f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+            #                 f"0.3 to 0.7 → the view has a clear outlet or large navigable space "
+            #                 f"(the higher the score, the clearer and more navigable it looks)\n"
+            #                 f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+            #                 f"Respond in JSON:\n"
+            #                 f"{{'done': <1 or 0>, 'global_semantic_score': <float 0.0 to 1.0>}}"
+            #             )
             stopping_prompt = (
                             f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
-                            f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
+                            f"Your job is to determine whether the agent sees a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
                             f"First, describe what you see in the image and whether a {goal} is present. "
-                            f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
+                            f"Second, you have two actions to choose from. First action: return 1 if you are VERY certian a {goal} is present in the scene. Second action: return 0 if it is far away, does not exist, or you are not sure. "
                             f"Third, Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], "
                             f"named global_semantic_score. This score MUST depend only on the current environment, "
                             f"NOT on whether the goal is present or visible. High scores mean the scene has open, "
@@ -3304,11 +3336,12 @@ class ObjectNavAgent(VLMNavAgent):
                             f"0.3 to 0.7 → the view has a clear outlet or large navigable space "
                             f"(the higher the score, the clearer and more navigable it looks)\n"
                             f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-                            f"Respond in JSON:\n"
-                            f"{{'done': <1 or 0>, 'global_semantic_score': <float 0.0 to 1.0>}}"
-                        )
-
-
+                            f"Write a ONE-sentence explanation first (no lists, no steps). "
+                            f"Then on a NEW LINE output ONLY the JSON object below. "
+                            f"IMPORTANT: The LAST line of your reply MUST be the JSON and nothing else.\n"
+                            f"JSON format:\n"
+                            f"{{\"done\": <1 or 0>, \"global_semantic_score\": <float 0.0 to 1.0>}}"
+                            )
 
 
 

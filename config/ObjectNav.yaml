@@ -66,8 +66,8 @@ agent_cfg:
       # model: gemini-1.5-flash-001
       # model: gpt-5
 
-      # model: gpt-4o-mini 
-      model: gpt-5-nano
+      model: gpt-4o-mini 
+      # model: gpt-5-nano
 
 
 
