@@ -22,7 +22,7 @@ agent_cfg:
 
 
   # discourage_ratio: 0.6 
-  discourage_ratio: 0.5 
+  discourage_ratio: 0.75 
 
 
   # Calibrate using VLM. If this is higher, less result will be clipped
