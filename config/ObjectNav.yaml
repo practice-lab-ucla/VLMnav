@@ -22,7 +22,7 @@ agent_cfg:
 
 
   # discourage_ratio: 0.6 
-  discourage_ratio: 0.75 
+  discourage_ratio: 0.8
 
 
   # Calibrate using VLM. If this is higher, less result will be clipped
@@ -87,7 +87,7 @@ sim_cfg:
 env_cfg:
   num_episodes: 1
   # max_steps: 10
-  max_steps: 150
+  max_steps: 25
   log_freq: 1
   split: val
   success_threshold: 0.3 
