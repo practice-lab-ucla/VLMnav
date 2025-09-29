@@ -8,6 +8,7 @@ import ast
 import concurrent.futures
 import csv
 import os
+import json, re
 
 from simWrapper import PolarAction, SimWrapper
 from utils import *
@@ -2056,7 +2057,7 @@ class VLMNavAgent(Agent):
         self.last_stopping_response = stopping_response
         self.last_stopping_prompt = stopping_prompt
 
-        dct = self._eval_response(stopping_response)
+        dct = self._eval_response_stopping(stopping_response)
 
         if 'done' in dct and 'global_semantic_score' in dct:
             done = int(dct['done'])
@@ -2937,6 +2938,66 @@ class VLMNavAgent(Agent):
         except (ValueError, SyntaxError):
             logging.error(f'Error parsing response {response}')
             return {}
+        
+
+
+    def _eval_response_stopping(self, response: str) -> dict:
+        """
+        Support two JSON snippets in one message:
+        Step 2: {"done": 0/1}               → take the FIRST done
+        Step 3: {"global_semantic_score": x} → take the LAST score
+        """
+        merged = {}
+        gsv_last = None
+        done_first = None
+        done_conflict = False
+
+        for block in re.findall(r'\{[\s\S]*?\}', response):
+            try:
+                obj = json.loads(block)
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+
+            # lock first 'done'
+            if 'done' in obj:
+                try:
+                    d = int(obj['done'])
+                    if done_first is None:
+                        done_first = d
+                    elif done_first != d:
+                        done_conflict = True
+                except Exception:
+                    pass
+
+            # keep last gsv
+            if 'global_semantic_score' in obj:
+                try:
+                    gsv_last = float(obj['global_semantic_score'])
+                except Exception:
+                    pass
+
+            merged.update(obj)
+
+        if done_first is not None:
+            merged['done'] = done_first
+        if gsv_last is not None:
+            merged['global_semantic_score'] = gsv_last
+
+        # coerce types
+        if 'done' in merged:
+            try: merged['done'] = int(merged['done'])
+            except Exception: pass
+        if 'global_semantic_score' in merged:
+            try: merged['global_semantic_score'] = float(merged['global_semantic_score'])
+            except Exception: pass
+
+        if done_conflict:
+            merged['_warning'] = 'conflicting_done_values_detected'
+
+        return merged
+
 
 
 
@@ -3296,52 +3357,63 @@ class ObjectNavAgent(VLMNavAgent):
             #             )
             
             # stopping_prompt = (
-            #                 f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
-            #                 f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
-            #                 f"First, describe what you see in the image and whether a {goal} is present. "
-            #                 f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
-            #                 f"Third, Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], "
-            #                 f"named global_semantic_score. This score MUST depend only on the current environment, "
-            #                 f"NOT on whether the goal is present or visible. High scores mean the scene has open, "
-            #                 f"traversable, informative paths (e.g., clear corridors, multiple branches, large visible free space). "
-            #                 f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions."
-            #                 f"Important rules for global_semantic_score:"
-            #                 f"Do NOT increase the score just because the {goal} is visible."
-            #                 f"Base it on openness, navigability cues, line of sight, and apparent paths."
-            #                 f"Examples: \n"
-            #                 f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-            #                 f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
-            #                 f"0.3 to 0.7 → the view has a clear outlet or large navigable space "
-            #                 f"(the higher the score, the clearer and more navigable it looks)\n"
-            #                 f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-            #                 f"Respond in JSON:\n"
-            #                 f"{{'done': <1 or 0>, 'global_semantic_score': <float 0.0 to 1.0>}}"
-            #             )
+            #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
+            #                     f"Your job is to decide if the agent is NOT FAR from a {goal}, based ONLY on what is VISIBLE in the image."
+            #                     f"Important: a chair is NOT a sofa, and a sofa is NOT a bed. Do NOT infer the {goal} from the room type or context.\n"
+
+            #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
+
+            #                     f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
+            #                     f"- Return 1 ONLY if the {goal} is clearly visible, and there is a clear path to it from the current view."
+            #                     f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
+
+            #                     f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
+            #                     f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
+            #                     f"High scores mean the scene has open, traversable, informative paths."
+            #                     f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
+
+            #                     f"Important rules for global_semantic_score:"
+            #                     f"- Do NOT increase the score just because the {goal} is visible."
+            #                     f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
+
+            #                     f"Examples:"
+            #                     f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+            #                     f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+            #                     f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
+            #                     f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+            #                     f"After Step 3, immediately output this JSON line:"
+            #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
+            # )
+
             stopping_prompt = (
-                            f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
-                            f"Your job is to determine whether the agent is not far from a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
-                            f"First, describe what you see in the image and whether a {goal} is present. "
-                            f"Second, you have two actions to choose from. First action: return 1 if you are VERY CERTAIN a {goal} is present in the scene, and the agent is not far from it. Second action: return 0 if it is far away, does not exist, or you are not sure. "
-                            f"Third, Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], "
-                            f"named global_semantic_score. This score MUST depend only on the current environment, "
-                            f"NOT on whether the goal is present or visible. High scores mean the scene has open, "
-                            f"traversable, informative paths."
-                            f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions."
-                            f"Important rules for global_semantic_score:"
-                            f"Do NOT increase the score just because the {goal} is visible."
-                            f"Base it on openness, navigability cues, line of sight, and apparent paths."
-                            f"Examples: \n"
-                            f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-                            f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
-                            f"0.3 to 0.7 → the view has a clear outlet or large navigable space "
-                            f"(the higher the score, the clearer and more navigable it looks)\n"
-                            f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-                            f"Write a explanation first. "
-                            f"Then on a NEW LINE output ONLY the JSON object below. "
-                            f"IMPORTANT: The LAST line of your reply MUST be the JSON and nothing else.\n"
-                            f"JSON format:\n"
-                            f"{{\"done\": <1 or 0>, \"global_semantic_score\": <float 0.0 to 1.0>}}"
-                            )
+                                f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
+                                f"Your job is to decide if the agent is NOT FAR from a {goal}, based ONLY on what is VISIBLE in the image."
+                                f"Important: a chair is NOT a sofa, and a sofa is NOT a bed. Do NOT infer the {goal} from the room type or context.\n"
+
+                                f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
+
+                                f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
+                                f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
+                                f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
+
+                                f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
+                                f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
+                                f"High scores mean the scene has open, traversable, informative paths."
+                                f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
+
+                                f"Important rules for global_semantic_score:"
+                                f"- Do NOT increase the score just because the {goal} is visible."
+                                f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
+
+                                f"Examples:"
+                                f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+                                f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+                                f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
+                                f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+                                f"After Step 3, immediately output this JSON line:"
+                                f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
+            )
+
 
 
 

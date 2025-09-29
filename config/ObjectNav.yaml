@@ -22,7 +22,7 @@ agent_cfg:
 
 
   # discourage_ratio: 0.6 
-  discourage_ratio: 0.8
+  discourage_ratio: 0.4
 
 
   # Calibrate using VLM. If this is higher, less result will be clipped
@@ -76,7 +76,10 @@ agent_cfg:
 sim_cfg:
   agent_height: 1.5
   agent_radius: 0.17
+  # agent_radius: 5
   allow_slide: true
+  # allow_slide: false
+
   use_goal_image_agent: false
   sensor_cfg:
     height: 1.5
