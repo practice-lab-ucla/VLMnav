@@ -26,11 +26,12 @@ agent_cfg:
 
 
   # Calibrate using VLM. If this is higher, less result will be clipped
-  max_action_dist_calibration: 1.7
+  # max_action_dist_calibration: 1.7
+  max_action_dist_calibration: 2.5
 
   max_action_dist: 1.7
-  # max_action_dist: 1.7 # clip action by a fixed number
-  min_action_dist: 0.8 # clip action by a fixed number
+  # min_action_dist: 0.8 # clip action by a fixed number
+  min_action_dist: 0.3 
 
 
   clip_frac: 1.0 # clip action a flat rate
@@ -57,6 +58,20 @@ agent_cfg:
   # turn_around_cooldown: 3 # steps before the agent can turn around again
   turn_around_cooldown: 0
 
+
+
+
+
+  agent_radius: 0.17
+  clearance_m: 0.1 
+  Depth_aware: True
+
+
+
+
+
+
+
   navigability_height_threshold: 0.2 # threshold from the ground to consider navigable
   map_scale: 100 #pixels per meter
   vlm_cfg:
@@ -64,19 +79,21 @@ agent_cfg:
     model_cls: ChatGPTVLM
     model_kwargs:
       # model: gemini-1.5-flash-001
-      # model: gpt-5
-
-      # model: gpt-4o-mini 
-      model: gpt-5-nano
 
 
+      model: gpt-4o-mini 
+      # model: gpt-5-nano
 
-      # model: gpt-4.5-preview
 
 sim_cfg:
   agent_height: 1.5
   agent_radius: 0.17
-  # agent_radius: 5
+
+
+
+
+
+
   allow_slide: true
   # allow_slide: false
 

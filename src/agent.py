@@ -1521,6 +1521,14 @@ class VLMNavAgent(Agent):
         if parent_step is None:
             parent_step = current_step - 1  # conservative fallback
 
+
+
+
+
+
+
+            
+
         # Build queue and restore pose from the *parent* step
         def build_queue_from_root(root_step: int):
             ranking = self.step_action_ranking_dict.get(root_step)
@@ -2702,6 +2710,37 @@ class VLMNavAgent(Agent):
             # Trace pixels until they are not navigable
             y = int(y_coords[i])
             x = int(x_coords[i])
+
+
+            ## obstacle avoidance
+            # ---- Depth-aware clearance stripe ----
+            if self.cfg['Depth_aware']:
+                # Current depth at (x, y). If depth is missing/invalid, treat as collision.
+                z_here = float(depth_image[y, x]) if depth_image is not None else float('inf')
+                if not np.isfinite(z_here) or z_here <= 0.0:
+                    out = (x, y)
+                    break
+                # Required world-space clearance (agent body radius + extra safety)
+                clearance_world = float(self.cfg['agent_radius']) + float(self.cfg['clearance_m'])
+
+
+                # Convert meters -> pixels using focal length and current depth
+                half_w = int(np.ceil(clearance_world * self.focal_length / z_here))
+
+                if half_w > 0:
+                    # A conservative square window around the centerline pixel
+                    x0, x1 = max(0, x - half_w), min(W - 1, x + half_w)
+                    y0, y1 = max(0, y - half_w), min(H - 1, y + half_w)
+
+                    # If ANY pixel in the window is not navigable, the footprint would collide
+                    if not np.all(navigability_mask[y0:y1+1, x0:x1+1]):
+                        out = (x, y)
+                        break
+            # ---- end depth-aware stripe ----
+
+
+
+
             if sum([navigability_mask[int(y_coords[j]), int(x_coords[j])] for j in range(i, i + 4)]) <= 2:
                 out = (x, y)
                 break
