@@ -1391,7 +1391,6 @@ class VLMNavAgent(Agent):
 
 
 
-
     def swipe_back_all_steps(self):
         """
         Scan ALL previous steps for the highest-score UNTRIED non-zero action.
@@ -1424,10 +1423,27 @@ class VLMNavAgent(Agent):
                     continue
                 if idx in tried:
                     continue
+
+#####################################################################################               
+                # sc = a.get("adjusted")
+                # if sc is None:
+                #     sc = a.get("score", 0.0)
+                # candidates.append((idx, float(sc)))
+
+
+#####################################################################################
                 sc = a.get("adjusted")
-                if sc is None:
-                    sc = a.get("score", 0.0)
-                candidates.append((idx, float(sc)))
+                bfs_min = log.get("min_score_to_curr")
+                if bfs_min is None:
+                    bfs_min = 0.0 
+
+                new_score = 10.0 * min(sc, bfs_min) + max(sc, bfs_min)
+                candidates.append((idx, new_score))
+#####################################################################################
+
+
+
+
 
             if not candidates:
                 continue
