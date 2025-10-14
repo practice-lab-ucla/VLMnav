@@ -603,6 +603,16 @@ class VLMNavAgent(Agent):
 
         print(f"[Step {self.step_ndx}] Global Semantic Score (GSV)AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa: {gsv:.3f}")
 
+        edges = self.generate_grid_edge_score_list_from_adjusted()
+        curr_grid = self.agent_grid_history.get(self.step_ndx)
+        path_to_curr, min_score_to_curr = modified_bfs(edges, curr_grid)
+
+        print(f"score is {min_score_to_curr} ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+        self.step_action_log_history_dict[self.step_ndx]["min_score_to_curr"] = min_score_to_curr
+
+
+
+
 
 
 
@@ -611,11 +621,8 @@ class VLMNavAgent(Agent):
             combined_score = self.step_score_history_dict[self.step_ndx] * gsv
             self.adjusted_score[self.step_ndx] = combined_score
 
-            edges = self.generate_grid_edge_score_list_from_adjusted()
         else:
             print(f"model stopped skipping adjusted score.")
-
-            edges = self.generate_grid_edge_score_list_from_adjusted()
 
             prev_step = self.step_ndx - 1
             prev_grid = self.agent_grid_history.get(prev_step)
@@ -1424,10 +1431,27 @@ class VLMNavAgent(Agent):
                     continue
                 if idx in tried:
                     continue
+
+#####################################################################################               
+                # sc = a.get("adjusted")
+                # if sc is None:
+                #     sc = a.get("score", 0.0)
+                # candidates.append((idx, float(sc)))
+
+
+#####################################################################################
                 sc = a.get("adjusted")
-                if sc is None:
-                    sc = a.get("score", 0.0)
-                candidates.append((idx, float(sc)))
+                bfs_min = log.get("min_score_to_curr")
+                if bfs_min is None:
+                    bfs_min = 0.0 
+
+                new_score = 10.0 * min(sc, bfs_min) + max(sc, bfs_min)
+                candidates.append((idx, new_score))
+#####################################################################################
+
+
+
+
 
             if not candidates:
                 continue
@@ -1527,7 +1551,7 @@ class VLMNavAgent(Agent):
 
 
 
-            
+
 
         # Build queue and restore pose from the *parent* step
         def build_queue_from_root(root_step: int):
