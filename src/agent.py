@@ -1100,6 +1100,11 @@ class VLMNavAgent(Agent):
 
 #####################################################################################
                 sc = a.get("adjusted")
+
+                threshold = float(self.cfg.get('vlm_score_threshold', 0.0))
+                if sc <= threshold:
+                    continue
+                
                 bfs_min = log.get("min_score_to_curr")
                 if bfs_min is None:
                     bfs_min = 0.0 
