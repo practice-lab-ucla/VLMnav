@@ -157,12 +157,6 @@ class VLMNavAgent(Agent):
         self.turnaround_streak = 0
 
 
-        ## currently same as first reach
-        self.initiate_back_propagation = False
-        self.first_reach = False
-
-        # backtrack start index
-        self.start_ndx = []
 
 
 
@@ -461,12 +455,7 @@ class VLMNavAgent(Agent):
 
 
 
-                # if (not self.initiate_back_propagation) and (next_action == 0):
-                #     print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
-                #     self.step_rewind(self.tree_root_step_ndx, 0)
-
-
-                if (not self.initiate_back_propagation) and (next_action == 0):
+                if next_action == 0:
 
                     if self.swipping_back and getattr(self, "tree_root_step_ndx", None) == 0:
                         pass 
@@ -711,51 +700,11 @@ class VLMNavAgent(Agent):
         # print("Maximized Minimum Score:", min_score)
 
 
-        if self.initiate_back_propagation and self.goal_grid_location is None:
-            if self.step_ndx in self.agent_grid_history:
-                self.goal_grid_location = self.agent_grid_history[self.step_ndx]
-                print(f"🎯 Goal grid location captured at step {self.step_ndx}: {self.goal_grid_location}")
-            else:
-                print("⚠️ Warning: Cannot capture goal grid location — not found in agent_grid_history.")
-
-
-        # if self.first_reach and self.goal_grid_location is not None:
-        if self.initiate_back_propagation:
-            print("📊 Grid Transitions with Adjusted Scores:")
-            # edges = self.generate_grid_edge_score_list_from_adjusted()
-            for r1, c1, r2, c2, score in edges:
-                print(f"({r1}, {c1})-({r2}, {c2}): {score}")
-
-            path, min_score = modified_bfs(edges, self.goal_grid_location)
-
-            print("✅ Running Modified BFS After Goal Reached")
-            print("📍 Goal:", self.goal_grid_location)
-            print("🏁 Best Path:", path)
-            print("📉 Maximized Minimum Score:", min_score)
-
-
-            self.best_bfs_path = set(path)
-            self.best_bfs_min = min_score
-
-
-            if self.best_bfs_min is not None:
-                print(f"🔻 BFS bottleneck score before stopping: {self.best_bfs_min:.3f}")
-            else:
-                print("🔻 BFS bottleneck score before stopping: None")
-
-
-        else:
-            print("⏳ Awaiting goal reach... BFS not triggered yet.")
         
 
 
         ##### calculate number of turns for warning purpose #####
         selected_action = metadata['step_metadata']['action_number']
-
-
-
-
-
 
 
         if selected_action == 0:
@@ -765,66 +714,10 @@ class VLMNavAgent(Agent):
 
 
 
-        # if (selected_action == 0 and not self.initiate_back_propagation and self.tree_root_state is not None and self.tree_action_queue):
-        #     # We’re in the middle of a sibling-walk; keep rewinding to this root
-        #     should_rewind_to_sibling = True
-
-        # ################# only do rewind to state when we ARE backtracking ##################
-
-        # should_rewind_to_sibling = False
 
 
 
         curr_grid = self.agent_grid_history.get(self.step_ndx)
-
-        should_rewind_to_sibling = False
-
-
-
-
-
-
-
-
-
-
-
-        if self.initiate_back_propagation:
-            # evaluate all rewind triggers first
-            trigger_rewind = (
-                selected_action == 0
-                or self.goal_reached
-                or (curr_grid is not None and curr_grid in self.best_bfs_path)
-            )
-
-            if trigger_rewind:
-                if self.first_reach:
-                    # First reach → do NOT rewind yet
-                    print("✅ First reach detected — skipping rewind this time")
-                    self.tree_action_queue = []
-                    self.first_reach = False
-                else:
-                    # Any subsequent time → do rewind
-                    if selected_action == 0:
-                        print("🔁 Turn-around detected → will rewind to next sibling")
-                    elif self.goal_reached:
-                        print("🔁 Goal reached on this branch → will rewind to next sibling")
-                    else:
-                        print(f"🔁 On BFS best-path grid {curr_grid} → will rewind to next sibling")
-                    should_rewind_to_sibling = True
-
-        if should_rewind_to_sibling:
-            self.defer_rewind_to_root = True
-
-
-
-
-
-
-
-
-        
-
 
 
 
@@ -860,16 +753,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
-
-
-
-
-
-
         # If we're already backtracking and standing on a node of the best BFS path,
         # skip re-traversing it—rewind to explore a different branch.
         if self.goal_reached:
@@ -880,231 +763,7 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
-
-
-        if self.initiate_back_propagation and self.goal_reached and not self.tree_action_queue:
-            # print(f"🔁 Initiating backtrack: min adjusted score = {self.min_score:.3f} at step {self.min_step}")
-            # backtrack_success, a_final = self.rewind_and_explore_from_log_state(self.min_score, self.start_ndx)
-
-            min_thresh = self.best_bfs_min
-
-            
-
-            if min_thresh is None:
-                min_thresh = 1.0
-                self.best_bfs_min = 1.0
-
-            print(f"🔁 Initiating backtrack with BFS min = {min_thresh:.3f} ")
-            print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-            self.start_ndx = max(self.step_ndx - 1, 0)
-            backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
-
-            raw_action_image = obs['color_sensor'].copy()
-            chosen_action_image = obs['color_sensor'].copy()
-
-            self._project_onto_image(
-                metadata['a_final'] if 'a_final' in metadata else [],
-                raw_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-            self._project_onto_image(
-                [], 
-                chosen_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-
-            self.step_ndx += 1
-
-            if backtrack_success:
-                print("action foundddddddddddddddddddddddddddddddddddd")
-                return None, {
-                    'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'backtrack from best BFS node',
-                                     'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
-        '                               STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None)},
-                    'a_final': a_final or [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-            else:
-                print("🛑 No further rewind options from best-path node — stopping")
-                self.overall_stop = True
-                return PolarAction.stop, {
-                    'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {
-                        'note': 'backtracking exhausted from best-path node',
-                        'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
-                        'STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None),
-                        
-                    },
-                    'a_final': [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-
-
-
-
-        # if self.initiate_back_propagation and len(self.tree_action_queue) == 1 and selected_action == 0:
-        if self.initiate_back_propagation and not self.tree_action_queue and selected_action == 0:
-
-            print("🔚 Finished all sub-actions at current rewind step")
-
-            min_thresh = self.best_bfs_min 
-
-
-            self.start_ndx = max(self.step_ndx - 1, 0)
-            print(f"🔁 Trying deeper rewind to step {self.start_ndx} with min_score {min_thresh:.3f}")
-            backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
-
-            print("first trigger+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-
-            if backtrack_success:
-                print(f"✅ Found new rewind target at step")
-                # return None, {
-                #     'step_metadata': {'action_number': -3, 'success': 1},
-                #     'logging_data': {'note': 'deeper backtrack initiated'},
-                #     'a_final': a_final,
-                #     'images': {'color_sensor': obs['color_sensor']}
-                # }
-            raw_action_image = obs['color_sensor'].copy()
-            chosen_action_image = obs['color_sensor'].copy()
-
-            # Project all actions WITHOUT highlight → raw image
-            self._project_onto_image(
-                metadata['a_final'],
-                raw_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-
-            # Project all actions WITH highlight → chosen image
-            self._project_onto_image(
-                metadata['a_final'],
-                chosen_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor'],
-                chosen_action=0
-            )
-            
-            
-            self.step_ndx += 1
-
-
-            if backtrack_success:
-                return None, {
-                    'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'deeper backtrack initiated'},
-                    'a_final': a_final,
-                    'images': {
-                        'color_sensor': raw_action_image,              # ✅ now has arrows
-                        'color_sensor_chosen': chosen_action_image     # ✅ arrows + highlight
-                    }
-                }
-            else:
-                print("🛑 No further rewind options — stopping")
-                self.overall_stop = True
-                return PolarAction.stop, {
-                    'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {'note': 'backtracking exhausted'},
-                    'a_final': [],
-                    'images': {'color_sensor': obs['color_sensor']}
-                }
-
-
-
-
-
-
-################################################################################################################################################
-
-        # Current grid (row, col) for this step
-        
-
-
-
-        if (self.initiate_back_propagation and curr_grid in self.best_bfs_path and not self.goal_reached and not self.tree_action_queue):
-
-            print(f"🟡 Backtracking and on best BFS path at step {self.step_ndx}, grid={curr_grid} → rewinding to explore a different branch")
-
-            min_thresh = self.best_bfs_min 
-
-            self.start_ndx = max(self.step_ndx - 1, 0)
-            backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
-
-            raw_action_image = obs['color_sensor'].copy()
-            chosen_action_image = obs['color_sensor'].copy()
-
-            self._project_onto_image(
-                metadata['a_final'] if 'a_final' in metadata else [],
-                raw_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-            self._project_onto_image(
-                metadata['a_final'] if 'a_final' in metadata else [],
-                chosen_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor'],
-                chosen_action=0
-            )
-
-            self.step_ndx += 1
-
-            if backtrack_success:
-                return None, {
-                    'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'backtrack from best BFS node'},
-                    'a_final': a_final or [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-            else:
-                print("🛑 No further rewind options from best-path node — stopping")
-                self.overall_stop = True
-                return PolarAction.stop, {
-                    'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {
-                        'note': 'backtracking exhausted from best-path node',
-                        'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
-                        'STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None),
-                        
-                    },
-                    'a_final': [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-
-
-################################################################################################################################################
-
-
-
-
-    
-
-
-        ################# only do step rewind when we are NOT backtracking ##################
-
-        # if (not self.initiate_back_propagation) and (selected_action == 0):
-        #     self.step_rewind(self.step_ndx, selected_action)
-
-
-        if (not self.initiate_back_propagation) and (selected_action == 0):
+        if selected_action == 0:
             if self.swipping_back:
                 # We are back-swiping: pick another global best untried option
                 if not self.swipe_back_all_steps():
@@ -1131,9 +790,9 @@ class VLMNavAgent(Agent):
 
         selected_action = metadata['step_metadata']['action_number']
         # If we're in global back-swipe mode (pre-goal), keep swiping until the goal is reached
-        if self.swipping_back and not self.initiate_back_propagation and not getattr(self, "defer_rewind_to_root", False) and selected_action == 0:
+        if self.swipping_back and not getattr(self, "defer_rewind_to_root", False) and selected_action == 0:
             if getattr(self, "tree_root_step_ndx", None) == 0:
-                pass  # allow; do NOT re-sweep here
+                pass  # allow; do NOT re-sweep here at root
             
             else:
                 if self.swipe_back_all_steps():
@@ -1177,7 +836,7 @@ class VLMNavAgent(Agent):
 
 
 
-        if (not self.initiate_back_propagation) and getattr(self, "terminate_after_local", False ) and not self.swipping_back:
+        if getattr(self, "terminate_after_local", False ) and not self.swipping_back:
             # Clear local rewind bookkeeping
             self.tree_action_queue = []
             self.defer_rewind_to_root = False
@@ -1628,149 +1287,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
-
-
-    def rewind_and_explore_from_log_state(self, min_adjusted: float, start_ndx: int = None):
-        import magnum as mn
-        from habitat_sim import AgentState
-        import numpy as np
-
-        stop_ndx = 0  # 🔁 Always go back to step 0
-
-        print(f"🔁 Rewind range: from step {start_ndx} down to {stop_ndx}")
-
-        for back_step in reversed(range(stop_ndx, start_ndx + 1)):
-            print(f"🔎 Checking Step {back_step} for retryable actions...")
-
-
-            if getattr(self, "goal_steps", None) and back_step in self.goal_steps:
-                print(f"+++++++++++⏭️ Skipping goal step {back_step}")
-                continue
-
-            log = self.step_action_log_history_dict.get(back_step)
-            if not log:
-                print(f"+++++++++++ Step {back_step} has log in that step, it is a rewind state")
-                continue
-
-            actions = log.get("actions") or [] 
-
-
-            try:
-                pos_vals = log["position"]
-                rot_vals = log["rotation"]
-            except Exception as e:
-                print(f"❌ Failed to parse state at step {back_step}: {e}")
-                continue
-
-            # Construct agent state
-            restored_state = AgentState()
-            restored_state.position = np.array(pos_vals, dtype=np.float32)
-
-            q = np.array(rot_vals, dtype=np.float32)
-            q /= np.linalg.norm(q)
-            # Move w to the end for magnum quaternion
-            q = np.concatenate((q[1:], q[:1]))  # [x, y, z, w] → [y, z, w, x]
-            restored_state.rotation = quat_from_coeffs(q)
-
-            # Extract adjusted scores and find retryable actions
-            # adjusted_scores = {
-            #     a["index"]: a["adjusted"]
-            #     for a in log["actions"]
-            #     if a["index"] != 0  # skip turn-around
-            # }
-
-
-            try:
-                adjusted_scores = {
-                    int(a["index"]): a.get("adjusted")
-                    for a in actions
-                    if int(a["index"]) != 0
-                }
-            except Exception as e:
-                print(f"❌ Issue in actions at step {back_step}: {e}")
-                continue
-
-
-
-
-
-
-
-            if not adjusted_scores:
-                print(f"⚠️ Step {back_step} has no actions to retry excluding turn arond")
-                continue
-
-            # Never retry anything we've already tried at this step (pre- or post-goal)
-            tried = self.tried_actions_by_step.get(back_step, set())
-
-            # Candidates: strictly above BFS bottleneck and not the turn-around (0)
-            candidates = [idx for idx, sc in adjusted_scores.items()
-                        if sc is not None and sc > min_adjusted and idx != 0]
-
-            # Global rule: remove anything ever tried at this step
-            actions_to_retry = [i for i in candidates if i not in tried]
-
-            if not actions_to_retry:
-                print(f"+++++++++++ Step {back_step} has no retryable actions above min_adjusted={min_adjusted:.3f} (all tried)")
-                continue
-
-            # Optional: execute higher-scoring alternatives first
-            actions_to_retry.sort(key=lambda i: adjusted_scores[i], reverse=True)
-
-
-            # Reconstruct a_final from log (excluding turn-around)
-            a_final_dict = {
-                a["index"]: (a["distance"], a["angle"])
-                for a in log["actions"]
-                if a["index"] != 0
-            }
-            a_final = [a_final_dict[k] for k in sorted(a_final_dict.keys())]
-
-            print(f"🔁 Rewinding to Step {back_step}, retrying actions: {actions_to_retry}")
-            print(f"🧿 Set tree root from Step {back_step}:")
-            print(f"   📍 Position = {restored_state.position}")
-            print(f"   🧭 Rotation (quat) = {restored_state.rotation}")
-
-            print("\n📋 Reconstructed a_final list (indexed by action number):")
-            for i, (r, theta) in enumerate(a_final):
-                print(f"  a_final[{i}] = distance: {r:.2f}, angle: {theta:.2f}°")
-
-            # Restore internal state
-            self.tree_root_state = restored_state
-            self.tree_action_queue = actions_to_retry
-            self.tree_root_a_final = a_final
-            self.tree_root_score_log = [a["adjusted"] for a in log["actions"]]  # ✅ log all adjusted scores
-            self.tree_root_step_ndx = back_step 
-            self.defer_rewind_to_root = True
-
-            
-
-            #### in the future we can start from the step -1 instead of rewinding to this step again ######
-            self.start_ndx = back_step - 1
-
-
-
-
-            return True, a_final
-
-        print("⚠️ No valid rewind candidates found")
-        return False, None
-
-
-
-
-
-
-
-
-
-
-
-
     def generate_grid_edge_score_list_from_adjusted(self):
         """
         Generate a list of transitions between grid cells with associated adjusted scores.
@@ -1896,10 +1412,10 @@ class VLMNavAgent(Agent):
         self.turnaround_streak = 0
         
 
-        self.initiate_back_propagation = False
+
         self.first_reach = False
 
-        self.start_ndx = []
+
 
 
         self.goal_reached = False
@@ -2445,17 +1961,13 @@ class VLMNavAgent(Agent):
 
             print(f"✅ Normalized confident scores NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN: {conf_scores_norm}")
 
-            # Update step metadata
             step_metadata['confident_score'] = conf_scores_norm
 
-            # Set the score to the max normalized score
             step_metadata['score'] = max(conf_scores_norm) if conf_scores_norm else 0.0
 
 
 
 
-            print(f"✅ Normalized confident scores: {conf_scores_norm}")
-            # print(f"⭐ Max score (used as 'score'): {step_metadata['score']}")
 
 
 
@@ -2467,12 +1979,51 @@ class VLMNavAgent(Agent):
 
 
 
-            # Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)
-            action_ranking = sorted(
-                [(i, score) for i, score in enumerate(conf_scores_norm)],
-                key=lambda x: -x[1]
-            )
+
+#################################################### filter part ####################################
+
+
+
+
+
+            # --- Print detailed action info right after normalization ---
+            if a_final is not None and len(a_final) == len(conf_scores_norm):
+                print("\n🎯 Action candidates after normalization:")
+
+                # Shift so last element (turnaround) becomes first
+                shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
+
+                for i, ((r, theta), score) in enumerate(shifted_pairs):
+                    print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                        f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {score * self.global_semantic_score:.5f}")
+            else:
+                print("⚠️ a_final or conf_scores_norm length mismatch — cannot print detailed action info.")
+
+
+
+
+
+
+
+            action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, adjusted_scores, high_indices = self._online_filter(a_final, conf_scores_norm)
+            # Save ranking for later modules (rewind, logging, etc.)
             self.step_action_ranking_dict[self.step_ndx] = action_ranking
+
+            print(f"\n🏅 action_ranking = {action_ranking}")
+
+
+
+
+
+
+            # # Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)
+            # action_ranking = sorted(
+            #     [(i, score) for i, score in enumerate(conf_scores_norm)],
+            #     key=lambda x: -x[1]
+            # )
+            # self.step_action_ranking_dict[self.step_ndx] = action_ranking
+            # print(f"\n🏅 action_ranking = {action_ranking}")
+
 
 
 
@@ -2480,19 +2031,12 @@ class VLMNavAgent(Agent):
 
 
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+            step_number = self.step_ndx
             conf_scores = step_metadata['confident_score']
             a_final = list(a_final)
-            step_number = self.step_ndx
+
 
             self.step_score_history_dict[step_number] = step_metadata['score']
-
-            # print("📊 Step Score History:")
-            # for step, score in self.step_score_history_dict.items():
-            #     print(f"  Step {step}: Score = {score}")
-
-
-            # Save log entry for this step
-
 
             self._record_log_entry(step_number, a_final, conf_scores, turnaround_available)
 
@@ -2525,9 +2069,7 @@ class VLMNavAgent(Agent):
 
 
         return step_metadata, logging_data, response
-
-
-
+    
 
     def _record_log_entry(self, step_number, a_final, conf_scores, turnaround_available):
         """
@@ -2645,15 +2187,63 @@ class VLMNavAgent(Agent):
 
 
 
+    def _online_filter(self, a_final, conf_scores_norm, threshold=None):
+        """
+        Online filter that selects high-confidence actions and returns ranking.
+        Now includes the same printed output as before.
+        """
+        if threshold is None:
+            threshold = self.cfg.get('vlm_score_threshold', 0.0)
+
+        # Guard conditions
+        if a_final is None or conf_scores_norm is None or len(a_final) != len(conf_scores_norm):
+            print("⚠️ Cannot compute adjusted scores (length mismatch).")
+            return [], [], [], [], [], []
+
+        gsv = float(self.global_semantic_score or 0.0)
+        adjusted_scores = [score * gsv for score in conf_scores_norm]
+        high_indices = [i for i, adj in enumerate(adjusted_scores) if adj > threshold]
+
+        # Reconstruct shifted pairs (turnaround first)
+        shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
+
+        if high_indices:
+            print(f"\n✅ Indices with adjusted score > threshold ({threshold:.3f}): {high_indices}")
+            print("🎯 Detailed info for high-confidence actions:")
+            for i in high_indices:
+                (r, theta), score = shifted_pairs[i]
+                adjusted_val = score * gsv
+                print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                    f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {adjusted_val:.5f}")
+        else:
+            print(f"⚠️ No actions exceeded threshold {threshold:.3f}.")
+
+        # Build filtered structure
+        high_conf_actions = []
+        orig_indices_filtered = []
+        for i in high_indices:
+            (r, theta), score = shifted_pairs[i]
+            adjusted_val = score * gsv
+            high_conf_actions.append({
+                "index": int(i),
+                "distance": round(float(r), 4),
+                "angle": round(float(theta), 5),
+                "score": round(float(score), 5),
+                "adjusted": round(float(adjusted_val), 5)
+            })
+            orig_indices_filtered.append(int(i))
+
+        a_final_filtered = [(float(h['distance']), float(h['angle'])) for h in high_conf_actions]
+        conf_scores_filtered = [float(h['score']) for h in high_conf_actions]
+
+        # Rank and print results
+        action_ranking = sorted(
+            [(orig_indices_filtered[i], conf_scores_filtered[i]) for i in range(len(conf_scores_filtered))],
+            key=lambda x: -x[1]
+        )
 
 
-
-
-
-
-
-
-
+        return action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, adjusted_scores, high_indices
 
 
 
@@ -3216,30 +2806,15 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
-        if len(self.stopping_calls) >= 1 and self.stopping_calls[-1] == self.step_ndx and not self.initiate_back_propagation:
-
-            if not self.first_reach:
-                self.start_ndx=self.step_ndx - 1
-
-
-                self.first_reach = True
+ 
 
 
 
 
-            print(11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111)
 
-
-
-
-        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
 
         if len(self.stopping_calls) >= 1 and self.stopping_calls[-1] == self.step_ndx:
         # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
-
-
-            self.initiate_back_propagation = True
 
             self.goal_reached = True
 
@@ -3255,20 +2830,13 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-            # ############ for testing only #############
-            # agent_action = PolarAction.stop
-            # return agent_action, {
-            #     'step_metadata': {'action_number': -2, 'success': 1},
-            #     'logging_data': {'note': 'backtrack initiated'},
-            #     'a_final': a_final,
-            #     'images': {'color_sensor': obs['color_sensor']}
-            # }
-            # ############ for testing only #############
 
+            ### at online we want the agent to stop immediately
 
-            return None, {
+            agent_action = PolarAction.stop
+            return agent_action, {
                 'step_metadata': {'action_number': -2, 'success': 1},
-                'logging_data': {'note': 'backtrack initiated'},  
+                'logging_data': {'note': 'backtrack initiated'},
                 'a_final': a_final,
                 'images': {'color_sensor': obs['color_sensor']}
             }

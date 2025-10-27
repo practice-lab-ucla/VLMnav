@@ -10,7 +10,7 @@ agent_cfg:
   explore_bias: 4 
 
 
-  vlm_score_threshold: 0.5
+  vlm_score_threshold: 0.1
 
 
 
@@ -64,10 +64,10 @@ agent_cfg:
 
   agent_radius: 0.17
   clearance_m: 0.1 
-  Depth_aware: True
+  Depth_aware: True # turn it on if we want obstacle avoidance
 
 
-
+  
 
 
 
