@@ -1104,7 +1104,7 @@ class VLMNavAgent(Agent):
                 threshold = float(self.cfg.get('vlm_score_threshold', 0.0))
                 if sc <= threshold:
                     continue
-                
+
                 bfs_min = log.get("min_score_to_curr")
                 if bfs_min is None:
                     bfs_min = 0.0 
@@ -2015,6 +2015,9 @@ class VLMNavAgent(Agent):
             self.step_action_ranking_dict[self.step_ndx] = action_ranking
 
             print(f"\n🏅 action_ranking = {action_ranking}")
+            if not action_ranking:  # means empty list → no valid action survived threshold
+                print("⚠️ No valid actions found — forcing turnaround (action 0)")
+                step_metadata['action_number'] = 0
 
 
 
@@ -2192,6 +2195,9 @@ class VLMNavAgent(Agent):
 
 
 
+
+
+
     def _online_filter(self, a_final, conf_scores_norm, threshold=None):
         """
         Online filter that selects high-confidence actions and returns ranking.
@@ -2222,6 +2228,7 @@ class VLMNavAgent(Agent):
                     f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {adjusted_val:.5f}")
         else:
             print(f"⚠️ No actions exceeded threshold {threshold:.3f}.")
+ 
 
         # Build filtered structure
         high_conf_actions = []
