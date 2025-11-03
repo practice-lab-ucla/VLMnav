@@ -73,7 +73,8 @@ class Env:
         if not os.path.exists(self.worker_csv):
             with open(self.worker_csv, 'w', newline='') as f:
                 w = csv.writer(f)
-                w.writerow(['episode_ndx', 'scene_id', 'bfs_min'])
+                # w.writerow(['episode_ndx', 'scene_id', 'bfs_min'])
+                w.writerow(['episode_ndx', 'scene_id', 'run_result', 'steps_taken'])
         # ============================
 
 
@@ -251,14 +252,12 @@ class Env:
 
 
         print("the agent is stopping @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-        bfs_min = self.agent.best_bfs_min
-        print("Best BFS Min Score:", bfs_min)
-        # append a row to this worker's CSV
+
+        run_result = self.agent.run_result
+        steps_taken = self.agent.steps_taken 
         scene_id = getattr(self.simWrapper, 'scene_id', '')
         with open(self.worker_csv, 'a', newline='') as f:
-            csv.writer(f).writerow([self.current_episode_ndx, scene_id, bfs_min])
-
-
+            csv.writer(f).writerow([self.current_episode_ndx, scene_id, run_result, steps_taken])
 
 
 

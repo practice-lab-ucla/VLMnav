@@ -119,45 +119,19 @@ def main() -> int:
                     "worker_id": worker_id,
                     "episode_ndx": r.get("episode_ndx", ""),
                     "scene_id": r.get("scene_id", ""),
-                    "bfs_min": r.get("bfs_min", ""),
+                    "run_result": r.get("run_result", ""),
+                    "steps_taken": r.get("steps_taken", ""),
                 })
 
     # Write combined CSV
     with out_path.open("w", newline="", encoding="utf-8") as fp:
-        writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "bfs_min"])
+        writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "run_result", "steps_taken"])
         writer.writeheader()
         writer.writerows(rows)
 
     print(f"[combine] Wrote {out_path} with {len(rows)} rows from {len(files)} files.")
 
-    # --- Collect bfs_min values ---
-    values = []
-    for r in rows:
-        try:
-            v = float(r["bfs_min"])
-            values.append(v)
-        except (ValueError, TypeError):
-            continue  # skip empty or invalid scores
 
-    if values:
-        values = np.array(values, dtype=float)
-
-        # Plot histogram
-        plt.hist(values, bins=30, edgecolor="black")
-        plt.title("Distribution of bfs_min Scores")
-        plt.xlabel("bfs_min")
-        plt.ylabel("Frequency")
-
-        hist_path = out_path.with_suffix(".png")
-        plt.savefig(hist_path, dpi=150)
-        plt.close()
-        print(f"[combine] Histogram saved to {hist_path}")
-
-        # Compute 5% quantile
-        quan = np.quantile(values, 0.05)
-        print(f"[combine] 5% quantile of bfs_min = {quan:.6f}")
-    else:
-        print("[combine] No valid bfs_min scores found — histogram skipped.")
 
     return 0
 

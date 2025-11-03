@@ -9,8 +9,8 @@ import math
 
 # ========================== CONFIG ==========================
 WAVE_SIZE = 10
-NUM_WAVES = 10
-MAX_STEPS = 200
+NUM_WAVES = 3
+MAX_STEPS = 10
 
 # WAVE_SIZE = 1
 # NUM_WAVES = 1
@@ -137,10 +137,14 @@ if __name__ == "__main__":
                             "worker_id": f.stem.split("_")[-1],
                             "episode_ndx": r.get("episode_ndx", ""),
                             "scene_id": r.get("scene_id", ""),
-                            "bfs_min": r.get("bfs_min", ""),
+                            "run_result": r.get("run_result", ""),
+                            "steps_taken": r.get("steps_taken", ""),
+
                         })
             with combined_out.open("w", newline="", encoding="utf-8") as fp:
-                writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "bfs_min"])
+                writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "run_result", "steps_taken"])
+
+
                 writer.writeheader()
                 writer.writerows(rows)
             print(f"[combine] Wrote {combined_out}")

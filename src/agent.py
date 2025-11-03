@@ -122,6 +122,10 @@ class VLMNavAgent(Agent):
         )
 
 
+        self.goal_reached = False 
+        self.run_result = "No"
+        self.steps_taken = 0
+
 
         self.tree_action_queue = []
         self.tree_root_state = None
@@ -1384,6 +1388,10 @@ class VLMNavAgent(Agent):
 
     def reset(self):
 
+
+        self.goal_reached = False 
+        self.run_result = "No"
+        self.steps_taken = 0
         self.tree_action_queue = []
         self.tree_root_state = None
         self.tree_root_score_log = []
@@ -2829,6 +2837,8 @@ class ObjectNavAgent(VLMNavAgent):
         # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
 
             self.goal_reached = True
+            self.run_result = "Yes" 
+            self.steps_taken = self.step_ndx
 
             self.goal_steps.add(self.step_ndx)
 
