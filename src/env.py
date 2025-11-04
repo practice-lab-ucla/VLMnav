@@ -199,6 +199,9 @@ class Env:
                     print("S")
                     print("S")
                     continue
+
+
+                #### if we dont want the conf score to discourage the distance set the second entry to 0
             
                 agent_action = self.agent._adjust_action_distance(agent_action, 1.0)
                 print("111111111111111111111111111111111111111111111111111111111111111111111111111111111")

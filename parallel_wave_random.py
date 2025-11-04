@@ -6,24 +6,18 @@ from pathlib import Path
 import csv
 import time
 import math
+import random
 
 # ========================== CONFIG ==========================
-WAVE_SIZE = 10
-NUM_WAVES = 10
-MAX_STEPS = 200
-
-# WAVE_SIZE = 1
-# NUM_WAVES = 1
-# MAX_STEPS = 5
+WAVE_SIZE = 3
+NUM_WAVES = 3
+MAX_STEPS = 3
 
 # Total environments in the whole pool (global count seen by main.py)
 TOTAL_ENVIRONMENTS = 1000
 
-# Start offset into the 0..TOTAL_ENVIRONMENTS-1 space
-# For the first 50, leave at 0. For the next 50 later, set to 50, etc.
-START_INSTANCE = 200
-
-
+# How many we are launching in THIS run
+TOTAL_INSTANCES_LAUNCHED = max(0, int(NUM_WAVES) * int(WAVE_SIZE))
 
 NUM_GPU = 1
 
@@ -33,14 +27,24 @@ SCRIPT_PATH = "scripts/main.py"
 PYTHON_BIN = "/home/qizhao/miniconda3/envs/vlm_nav/bin/python"
 # ===========================================================
 
-# How many we are launching in THIS run
-TOTAL_INSTANCES_LAUNCHED = max(0, int(NUM_WAVES) * int(WAVE_SIZE))
+if TOTAL_INSTANCES_LAUNCHED <= 0:
+    raise ValueError("Nothing to launch. Increase NUM_WAVES and/or WAVE_SIZE.")
 
-if START_INSTANCE + TOTAL_INSTANCES_LAUNCHED > TOTAL_ENVIRONMENTS:
+if TOTAL_INSTANCES_LAUNCHED > TOTAL_ENVIRONMENTS:
     raise ValueError(
-        f"Slice ({START_INSTANCE}..{START_INSTANCE + TOTAL_INSTANCES_LAUNCHED - 1}) "
-        f"exceeds TOTAL_ENVIRONMENTS={TOTAL_ENVIRONMENTS}"
+        f"Requested {TOTAL_INSTANCES_LAUNCHED} instances but only {TOTAL_ENVIRONMENTS} environments available."
     )
+
+# Choose random unique instance IDs from the global pool
+# You can set RANDOM_SEED to make the selection repeatable (or None to be random each run)
+RANDOM_SEED = None  # e.g. 42 for deterministic sampling
+if RANDOM_SEED is not None:
+    random.seed(RANDOM_SEED)
+
+selected_instances = random.sample(range(TOTAL_ENVIRONMENTS), TOTAL_INSTANCES_LAUNCHED)
+
+# organize runs into waves preserving randomness
+local_ids = list(range(TOTAL_INSTANCES_LAUNCHED))
 
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 LOG_DIR = f"logs/parallel_run_{timestamp}"
@@ -52,14 +56,12 @@ print("🔧 Launch Configuration:")
 print(f"- Waves: {NUM_WAVES}")
 print(f"- Wave Size: {WAVE_SIZE}")
 print(f"- Total Environments (global): {TOTAL_ENVIRONMENTS}")
-print(f"- This run launches: {TOTAL_INSTANCES_LAUNCHED} (from {START_INSTANCE})")
+print(f"- This run launches: {TOTAL_INSTANCES_LAUNCHED} (random unique instances)")
 print(f"- Max Steps per Episode: {MAX_STEPS}")
 print(f"- Log Directory: {LOG_DIR}\n")
 
-def run_instance(local_index: int):
-    # Map local 0..TOTAL_INSTANCES_LAUNCHED-1 to global instance ids
-    instance_id = START_INSTANCE + local_index
 
+def run_instance(instance_id: int):
     gpu_id = instance_id % max(1, NUM_GPU)
     cmd = (
         f"RUN_ID={timestamp} "
@@ -69,8 +71,8 @@ def run_instance(local_index: int):
         f"{PYTHON_BIN} {SCRIPT_PATH} "
         f"--config {CONFIG} "
         f"--parallel "
-        f"--instances {TOTAL_ENVIRONMENTS} "   # <-- pass the global total (1000)
-        f"--instance {instance_id} "           # <-- the specific slice we're running now
+        f"--instances {TOTAL_ENVIRONMENTS} "
+        f"--instance {instance_id} "
         f"--max_steps {MAX_STEPS} "
         f"--port {PORT}"
     )
@@ -83,30 +85,25 @@ def run_instance(local_index: int):
     else:
         print(f"✅ Instance {instance_id} finished, logs in {log_file_path}")
 
-if __name__ == "__main__":
-    if TOTAL_INSTANCES_LAUNCHED <= 0:
-        raise ValueError("Nothing to launch. Increase NUM_WAVES and/or WAVE_SIZE.")
 
+if __name__ == "__main__":
     start_time = datetime.now()
 
-    # Local indices we will launch this run
-    local_ids = list(range(TOTAL_INSTANCES_LAUNCHED))
     computed_waves = math.ceil(TOTAL_INSTANCES_LAUNCHED / max(1, WAVE_SIZE))
     print(f"▶️ Planning to run {TOTAL_INSTANCES_LAUNCHED} instance(s) "
           f"in {computed_waves} wave(s) of up to {WAVE_SIZE} each")
 
     wave = 0
     wave_start = datetime.now()
+    # chunk the selected_instances into waves of WAVE_SIZE
     for start in range(0, TOTAL_INSTANCES_LAUNCHED, WAVE_SIZE):
         wave += 1
-        batch_local = local_ids[start:start + WAVE_SIZE]
-        batch_global = [START_INSTANCE + i for i in batch_local]
-        print(f"\n🌊 Wave {wave}/{computed_waves}: launching instances {batch_global}")
+        batch_instances = selected_instances[start:start + WAVE_SIZE]
+        print(f"\n🌊 Wave {wave}/{computed_waves}: launching instances {batch_instances}")
 
-        # wave_start = datetime.now()
-
-        with Pool(processes=len(batch_local), maxtasksperchild=1) as pool:
-            pool.map(run_instance, batch_local)
+        # use a process pool to run the batch in parallel
+        with Pool(processes=len(batch_instances), maxtasksperchild=1) as pool:
+            pool.map(run_instance, batch_instances)
 
         wave_end = datetime.now()
         wave_elapsed = wave_end - wave_start
@@ -114,7 +111,7 @@ if __name__ == "__main__":
 
         print(f"✅ Wave {wave} complete. "
               f"Used time: {int(minutes)} min {int(seconds)} sec")
-        
+
     end_time = datetime.now()
     elapsed = end_time - start_time
     minutes, seconds = divmod(elapsed.total_seconds(), 60)
@@ -142,8 +139,7 @@ if __name__ == "__main__":
 
                         })
             with combined_out.open("w", newline="", encoding="utf-8") as fp:
-                writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "run_result", "steps_taken"])
-
+                writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "run_result", "steps_taken"]) 
 
                 writer.writeheader()
                 writer.writerows(rows)
