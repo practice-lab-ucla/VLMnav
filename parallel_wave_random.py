@@ -9,9 +9,12 @@ import math
 import random
 
 # ========================== CONFIG ==========================
-WAVE_SIZE = 3
-NUM_WAVES = 3
-MAX_STEPS = 3
+WAVE_SIZE = 10
+NUM_WAVES = 10
+MAX_STEPS = 200
+
+# Avoid some range
+FORBIDDEN_RANGE = range(200, 221)
 
 # Total environments in the whole pool (global count seen by main.py)
 TOTAL_ENVIRONMENTS = 1000
@@ -35,13 +38,15 @@ if TOTAL_INSTANCES_LAUNCHED > TOTAL_ENVIRONMENTS:
         f"Requested {TOTAL_INSTANCES_LAUNCHED} instances but only {TOTAL_ENVIRONMENTS} environments available."
     )
 
-# Choose random unique instance IDs from the global pool
-# You can set RANDOM_SEED to make the selection repeatable (or None to be random each run)
+# Avoid sampling from a specific forbidden range (e.g., 200–220)
+valid_ids = [i for i in range(TOTAL_ENVIRONMENTS) if i not in FORBIDDEN_RANGE]
+
+# Choose random unique instance IDs from the valid pool
 RANDOM_SEED = None  # e.g. 42 for deterministic sampling
 if RANDOM_SEED is not None:
     random.seed(RANDOM_SEED)
 
-selected_instances = random.sample(range(TOTAL_ENVIRONMENTS), TOTAL_INSTANCES_LAUNCHED)
+selected_instances = random.sample(valid_ids, TOTAL_INSTANCES_LAUNCHED)
 
 # organize runs into waves preserving randomness
 local_ids = list(range(TOTAL_INSTANCES_LAUNCHED))
@@ -56,7 +61,7 @@ print("🔧 Launch Configuration:")
 print(f"- Waves: {NUM_WAVES}")
 print(f"- Wave Size: {WAVE_SIZE}")
 print(f"- Total Environments (global): {TOTAL_ENVIRONMENTS}")
-print(f"- This run launches: {TOTAL_INSTANCES_LAUNCHED} (random unique instances)")
+print(f"- This run launches: {TOTAL_INSTANCES_LAUNCHED} (random unique instances, avoiding {FORBIDDEN_RANGE.start}-{FORBIDDEN_RANGE.stop - 1})")
 print(f"- Max Steps per Episode: {MAX_STEPS}")
 print(f"- Log Directory: {LOG_DIR}\n")
 
