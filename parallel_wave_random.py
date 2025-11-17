@@ -13,6 +13,10 @@ WAVE_SIZE = 10
 NUM_WAVES = 10
 MAX_STEPS = 200
 
+# WAVE_SIZE = 10
+# NUM_WAVES = 2
+# MAX_STEPS = 2
+
 # Avoid sample from some range
 FORBIDDEN_RANGE = range(196, 223)
 
