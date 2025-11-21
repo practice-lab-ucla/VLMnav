@@ -62,8 +62,11 @@ agent_cfg:
 
 
 
-  agent_radius: 0.17
-  clearance_m: 0.1 
+  # agent_radius: 0.17
+  # clearance_m: 0.1 
+
+  agent_radius: 0.1
+  clearance_m: 0.05 
   Depth_aware: True
 
 
@@ -86,8 +89,13 @@ agent_cfg:
 
 
 sim_cfg:
-  agent_height: 1.5
-  agent_radius: 0.17
+  # agent_height: 1.5
+  # agent_radius: 0.17
+
+
+  agent_height: 0.5
+  agent_radius: 0.1
+
 
 
 
@@ -99,7 +107,8 @@ sim_cfg:
 
   use_goal_image_agent: false
   sensor_cfg:
-    height: 1.5
+    # height: 1.5
+    height: 0.5
     pitch: -0.45
     res_factor: 1
     fov: 131
@@ -107,7 +116,7 @@ sim_cfg:
 env_cfg:
   num_episodes: 1
   # max_steps: 10
-  max_steps: 1
+  max_steps: 20
   log_freq: 1
   split: val
   success_threshold: 0.3 
