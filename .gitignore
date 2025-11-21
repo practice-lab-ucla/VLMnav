@@ -7,4 +7,3 @@ wandb/
 src/VLMnav.egg-info/
 .env
 rrt_star_record/
-ima_log/
