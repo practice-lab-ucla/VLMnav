@@ -7,3 +7,4 @@ wandb/
 src/VLMnav.egg-info/
 .env
 rrt_star_record/
+topdown_maps_single/

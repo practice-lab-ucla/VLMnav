@@ -93,7 +93,7 @@ sim_cfg:
   # agent_radius: 0.17
 
 
-  agent_height: 0.5
+  agent_height: 0.9
   agent_radius: 0.1
 
 
@@ -108,7 +108,7 @@ sim_cfg:
   use_goal_image_agent: false
   sensor_cfg:
     # height: 1.5
-    height: 0.5
+    height: 0.9
     pitch: -0.45
     res_factor: 1
     fov: 131
