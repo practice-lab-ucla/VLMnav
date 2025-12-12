@@ -42,6 +42,11 @@ class Env:
         Args:
             cfg (dict): Configuration dictionary containing environment, simulation, and agent settings.
         """
+        # self.distance_to_goal = 0
+        self.distance_to_goal = float('inf')
+
+
+
         self.cfg = cfg['env_cfg']
         self.sim_cfg = cfg['sim_cfg']
         if self.cfg['name'] == 'default':
@@ -73,8 +78,10 @@ class Env:
         if not os.path.exists(self.worker_csv):
             with open(self.worker_csv, 'w', newline='') as f:
                 w = csv.writer(f)
-                # w.writerow(['episode_ndx', 'scene_id', 'bfs_min'])
-                w.writerow(['episode_ndx', 'scene_id', 'run_result', 'steps_taken'])
+  
+                # w.writerow(['episode_ndx', 'scene_id', 'run_result', 'steps_taken'])
+                w.writerow(['episode_ndx', 'scene_id', 'run_result', 'steps_taken', 'distance_to_g', 'dis_true', 'real_true'])
+
         # ============================
 
 
@@ -259,8 +266,36 @@ class Env:
         run_result = self.agent.run_result
         steps_taken = self.agent.steps_taken 
         scene_id = getattr(self.simWrapper, 'scene_id', '')
+
+
+        # with open(self.worker_csv, 'a', newline='') as f:
+        #     csv.writer(f).writerow([self.current_episode_ndx, scene_id, run_result, steps_taken])
+
+
+        # Calculate final distance to goal
+
+        distance_to_g = self.distance_to_goal
+        dis_true = False
+        real_true = False
+
+
+        print("test final distance with envvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv", distance_to_g)
+
+        # Compare with d_goal threshold from config
+        d_goal = self.cfg.get('d_goal', None)
+        if d_goal is not None and distance_to_g < d_goal:
+            dis_true = True
+
+        # If both run_result and dis_true are True → mark real_true = True
+        if dis_true and run_result:
+            real_true = True
+
         with open(self.worker_csv, 'a', newline='') as f:
-            csv.writer(f).writerow([self.current_episode_ndx, scene_id, run_result, steps_taken])
+            csv.writer(f).writerow([
+                self.current_episode_ndx, scene_id, run_result, steps_taken,
+                distance_to_g, dis_true, real_true
+            ])
+
 
 
 
@@ -332,11 +367,18 @@ class Env:
         metrics = {}
         self.path_calculator.requested_start = agent_state.position
         metrics['distance_to_goal'] = self.simWrapper.get_path(self.path_calculator)
+
+        self.distance_to_goal = metrics['distance_to_goal'] 
+
+
         metrics['spl'] = 0
         metrics['goal_reached'] = False
         metrics['done'] = False
         metrics['finish_status'] = 'running'
 
+
+
+        # print("test final distance with envvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",metrics['distance_to_goal'])
 
 
 
