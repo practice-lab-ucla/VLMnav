@@ -689,6 +689,9 @@ class ObjectNavEnv(Env):
         agent_state = obs['agent_state']
         self.agent_distance_traveled += np.linalg.norm(agent_state.position - self.prev_agent_position)
         self.prev_agent_position = agent_state.position
+
+
+        obs["episode_name"] = self.curr_run_name
         agent_action, metadata = self.agent.step(obs)
 
 
