@@ -122,10 +122,42 @@ if __name__ == "__main__":
     minutes, seconds = divmod(elapsed.total_seconds(), 60)
     print(f"🏁 All planned instances finished. Total runtime: {int(minutes)} min {int(seconds)} sec")
 
+    # # === Combine worker CSVs ===
+    # try:
+    #     combined_out = Path(WORKER_LOG_DIR) / "combined_workers.csv"
+    #     combined_out.parent.mkdir(parents=True, exist_ok=True)
+    #     worker_files = sorted(Path(WORKER_LOG_DIR).glob("worker_*.csv"))
+    #     if not worker_files:
+    #         print("[combine] No worker_*.csv files found. Skipping merge.")
+    #     else:
+    #         rows = []
+    #         for f in worker_files:
+    #             with f.open(newline="", encoding="utf-8") as fp:
+    #                 reader = csv.DictReader(fp)
+    #                 for r in reader:
+    #                     rows.append({
+    #                         "worker_id": f.stem.split("_")[-1],
+    #                         "episode_ndx": r.get("episode_ndx", ""),
+    #                         "scene_id": r.get("scene_id", ""),
+    #                         "run_result": r.get("run_result", ""),
+    #                         "steps_taken": r.get("steps_taken", ""),
+
+    #                     })
+    #         with combined_out.open("w", newline="", encoding="utf-8") as fp:
+    #             writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "run_result", "steps_taken"]) 
+
+    #             writer.writeheader()
+    #             writer.writerows(rows)
+    #         print(f"[combine] Wrote {combined_out}")
+    # except Exception as e:
+    #     print(f"[combine] ERROR while combining worker CSVs: {e}")
+
+
     # === Combine worker CSVs ===
     try:
         combined_out = Path(WORKER_LOG_DIR) / "combined_workers.csv"
         combined_out.parent.mkdir(parents=True, exist_ok=True)
+
         worker_files = sorted(Path(WORKER_LOG_DIR).glob("worker_*.csv"))
         if not worker_files:
             print("[combine] No worker_*.csv files found. Skipping merge.")
@@ -136,18 +168,34 @@ if __name__ == "__main__":
                     reader = csv.DictReader(fp)
                     for r in reader:
                         rows.append({
-                            "worker_id": f.stem.split("_")[-1],
+                            # If you want to SKIP worker_id, remove this key and from fieldnames below
+                            # "worker_id": f.stem.split("_")[-1],
+
                             "episode_ndx": r.get("episode_ndx", ""),
                             "scene_id": r.get("scene_id", ""),
                             "run_result": r.get("run_result", ""),
                             "steps_taken": r.get("steps_taken", ""),
-
+                            "distance_to_g": r.get("distance_to_g", ""),
+                            "dis_true": r.get("dis_true", ""),
+                            "real_true": r.get("real_true", ""),
                         })
-            with combined_out.open("w", newline="", encoding="utf-8") as fp:
-                writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "run_result", "steps_taken"]) 
 
+            fieldnames = [
+                # "worker_id",
+                "episode_ndx",
+                "scene_id",
+                "run_result",
+                "steps_taken",
+                "distance_to_g",
+                "dis_true",
+                "real_true",
+            ]
+
+            with combined_out.open("w", newline="", encoding="utf-8") as fp:
+                writer = csv.DictWriter(fp, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(rows)
+
             print(f"[combine] Wrote {combined_out}")
     except Exception as e:
         print(f"[combine] ERROR while combining worker CSVs: {e}")
