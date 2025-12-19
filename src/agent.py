@@ -114,6 +114,9 @@ class VLMNavAgent(Agent):
         self.fov = cfg['sensor_cfg']['fov']
 
 
+        
+
+
 
         self.simWrapper: SimWrapper = None
         self.resolution = (
@@ -208,6 +211,7 @@ class VLMNavAgent(Agent):
 
 
         self.focal_length = calculate_focal_length(self.fov, self.resolution[1])
+        print("fovvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",self.fov)
         self.scale = cfg['map_scale']
         self._initialize_vlms(cfg['vlm_cfg'])       
         self.pivot = PIVOT(self.actionVLM, self.fov, self.resolution, max_action_length=cfg['max_action_dist']) if cfg['pivot'] else None
@@ -2826,6 +2830,11 @@ class VLMNavAgent(Agent):
             [0, 0, 0], agent_state, sensor_state, 
             resolution=self.resolution, focal_length=self.focal_length
         )
+
+        # print("start_px in agent.pyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:", self.focal_length)
+
+
+
         for _, (r_i, theta_i) in enumerate(a_final):
             text_size = 2.4 * scale_factor
             text_thickness = math.ceil(3 * scale_factor)

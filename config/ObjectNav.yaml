@@ -115,6 +115,7 @@ sim_cfg:
     pitch: -0.45
     res_factor: 1
     fov: 131
+    # fov: 69.5
 
 env_cfg:
   num_episodes: 1
