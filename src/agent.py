@@ -2785,6 +2785,87 @@ class VLMNavAgent(Agent):
             r_i = np.linalg.norm([local_coords[0], local_coords[2]])
 
         return r_i, theta_i
+    
+
+
+
+
+
+
+
+    def _save_goal_image_once(self, obs: dict, out_dir: str = "logs/goal_image") -> None:
+        """
+        Save the current RGB observation once (first time goal is reached).
+        Filename: <episode_name>_<goalname>.png (auto-suffix _2, _3 if exists)
+        """
+        if getattr(self, "_saved_goal_image", False):
+            return
+
+        import os
+        from PIL import Image
+
+        os.makedirs(out_dir, exist_ok=True)
+
+        episode_name = obs.get("episode_name", "unknown_episode")
+
+        # goal can be dict (GOAT) or string (ObjectNav)
+        goal = obs.get("goal", "unknown_goal")
+        if isinstance(goal, dict):
+            goal_name = goal.get("name", goal.get("object", "unknown_goal"))
+        else:
+            goal_name = str(goal)
+
+        goal_name = goal_name.replace(" ", "_")
+
+        base = f"{episode_name}_{goal_name}"
+        out_path = os.path.join(out_dir, base + ".png")
+
+        k = 2
+        while os.path.exists(out_path):
+            out_path = os.path.join(out_dir, f"{base}_{k}.png")
+            k += 1
+
+        if "color_sensor" not in obs:
+            print("[WARN] no color_sensor in obs, cannot save goal image")
+            return
+
+        img = obs["color_sensor"]
+        if getattr(img, "dtype", None) != "uint8":
+            img = img.astype("uint8")
+
+        Image.fromarray(img).save(out_path)
+        print("✅ saved goal image:", out_path)
+
+        self._saved_goal_image = True
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     def _can_project(self, r_i: float, theta_i: float, agent_state: habitat_sim.AgentState, sensor_state: habitat_sim.SixDOFPose):
         """
@@ -3225,6 +3306,11 @@ class ObjectNavAgent(VLMNavAgent):
 
 
                 self.first_reach = True
+
+                if self.first_reach == True:
+                    self._save_goal_image_once(obs)
+                    
+
 
 
 

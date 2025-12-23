@@ -625,7 +625,12 @@ class ObjectNavEnv(Env):
         self.simWrapper.set_state(pos=self.init_pos, quat=rotation)
         self.curr_run_name = f"{episode_ndx}_{self.simWrapper.scene_id}"
 
+
+
         obs = self.simWrapper.step(PolarAction.null)
+
+
+
         return obs
 
     # def _step_env(self, obs: dict):
@@ -642,6 +647,9 @@ class ObjectNavEnv(Env):
         """
         super()._step_env(obs)
         obs['goal'] = self.current_episode['object']
+        obs['episode_name'] = self.curr_run_name
+
+
         agent_state = obs['agent_state']
         self.agent_distance_traveled += np.linalg.norm(agent_state.position - self.prev_agent_position)
         self.prev_agent_position = agent_state.position
