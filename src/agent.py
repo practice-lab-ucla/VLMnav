@@ -205,7 +205,7 @@ class VLMNavAgent(Agent):
         self.parent_by_step = {}
         self.swipping_back = False
 
-
+        self.path_length_m = 0.0
 
 
 
@@ -558,6 +558,41 @@ class VLMNavAgent(Agent):
             self._initial_pose = habitat_sim.AgentState()
             self._initial_pose.position = np.array(agent_state.position, dtype=np.float32).copy()
             self._initial_pose.rotation = agent_state.rotation 
+
+
+
+#################################################################### path_find
+        ####################################################################
+        # Inside your step() method: compute and print geodesic info
+        agent_state = obs['agent_state']
+        curr_pos = np.array(agent_state.position, dtype=np.float32)
+
+        # Make sure you have stored the initial position on step 0
+        if self.step_ndx == 0 or self.init_pos is None:
+            self.init_pos = np.array(agent_state.position, dtype=np.float32)
+
+        pf = self.simWrapper.sim.pathfinder
+
+        # --- Compute full shortest path from start → current ---
+        shortest_path = habitat_sim.ShortestPath()
+        shortest_path.requested_start = np.array(self.init_pos, dtype=np.float32)
+        shortest_path.requested_end = curr_pos
+
+        found = pf.find_path(shortest_path)
+
+        if found:
+            dist_start_to_curr = float(shortest_path.geodesic_distance)
+            print(f"📏 Geodesic distance (l_i) from START to CURRENT: {dist_start_to_curr:.3f} m")
+            print(f"✅ shortest_path.geodesic_distance: {shortest_path.geodesic_distance:.3f} m")
+            print(f"✅ shortest_path.points:\n{np.array(shortest_path.points)}")
+        else:
+            print("⚠️ No navigable path found between start and current position.")
+            dist_start_to_curr = float('inf')
+        ####################################################################
+
+
+####################################################################
+        
 
 
         agent_action, metadata = self._choose_action(obs)
@@ -1005,6 +1040,48 @@ class VLMNavAgent(Agent):
         return agent_action, metadata
     
 
+    def _accumulate_rewind_distance(self, from_step: int, to_step: int):
+        """
+        When we teleport from from_step back to an ancestor to_step,
+        we still want to charge the path length as if we had walked
+        back along the recorded trajectory.
+
+        This walks parent_by_step: from_step -> parent -> ... -> to_step,
+        summing Euclidean distances between logged positions.
+        """
+        if from_step is None or to_step is None:
+            return
+        if from_step <= to_step:
+            return
+
+        import numpy as np
+
+        traveled = 0.0
+        s = from_step
+        # Walk upwards until we reach the ancestor to_step
+        while s > to_step:
+            parent = self.parent_by_step.get(s)
+            if parent is None:
+                break
+
+            child_log = self.step_action_log_history_dict.get(s)
+            parent_log = self.step_action_log_history_dict.get(parent)
+            if child_log is None or parent_log is None:
+                break
+
+            p_child = np.array(child_log["position"], dtype=np.float32)
+            p_parent = np.array(parent_log["position"], dtype=np.float32)
+            seg = float(np.linalg.norm(p_child - p_parent))
+            traveled += seg
+
+            s = parent
+
+        if traveled > 0.0:
+            self.path_length_m += traveled
+            print(
+                f"🔁 Rewind virtual travel {from_step} → {to_step}: "
+                f"{traveled:.3f} m (total={self.path_length_m:.3f} m)"
+            )
 
 
 
@@ -1136,6 +1213,13 @@ class VLMNavAgent(Agent):
             best_idx, _ = candidates[0]
 
             # Rebuild agent state at that step (same quat convention as rewind)
+
+
+
+
+            self._accumulate_rewind_distance(self.step_ndx, back_step)
+
+
             restored = AgentState()
             restored.position = np.array(log["position"], dtype=np.float32)
             q = np.array(log["rotation"], dtype=np.float32)  # [w, x, y, z]
@@ -1193,42 +1277,25 @@ class VLMNavAgent(Agent):
 
 
 
-
-
     def step_rewind(self, current_step: int, selected_action: int):
         # Only trigger on action 0
         if selected_action != 0:
             return
 
-        # # If we’re at initial pose or step 0, no-op
-        # if self._at_state(self._initial_pose) or current_step <= 0:
-        #     return
-
-
         parent_step = self.parent_by_step.get(current_step)
 
-
         if parent_step is None:
-
             print("the agent is at the initial state +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
             # No parent to rewind to (e.g., step 0 root). Do nothing here so the
             # caller will execute the actual turn-around action (action 0) in-place.
             return
 
-
         print(f"🌳 [step_rewind] Rewinding from step {current_step} → parent step {parent_step}========================================")
-        if parent_step is None:
-            parent_step = current_step - 1  # conservative fallback
 
+        # 1) Charge the virtual distance for walking back along the path
+        self._accumulate_rewind_distance(current_step, parent_step)
 
-
-
-
-
-
-
-
-        # Build queue and restore pose from the *parent* step
+        # 2) Rebuild the rewind root state and action queue for that parent step
         def build_queue_from_root(root_step: int):
             ranking = self.step_action_ranking_dict.get(root_step)
             prev_log = self.step_action_log_history_dict.get(root_step)
@@ -1236,16 +1303,7 @@ class VLMNavAgent(Agent):
                 return None, None, None
 
             tried = self.tried_actions_by_step.get(root_step, set())
-            # remaining = [i for i, _ in ranking if i not in tried and i != 0]
             remaining = [i for i, _ in ranking if i not in tried]
-
-
-            # remaining = [i for i, _ in ranking if i not in tried and i != 0]
-            # if 0 not in tried:
-            #     remaining.append(0)
-
-
-
 
             from habitat_sim import AgentState
             import numpy as np
@@ -1260,9 +1318,10 @@ class VLMNavAgent(Agent):
 
             actions = prev_log.get('actions') or []
             sorted_actions = sorted(actions, key=lambda a: int(a.get('index', 0)))
-            a_final = [(a['distance'], a['angle']) for a in sorted_actions if int(a.get('index', 0)) != 0]
-            # a_final = [(a['distance'], a['angle']) for a in sorted_actions]
-
+            # Build a_final, skipping index 0 (turnaround)
+            a_final = [(a['distance'], a['angle'])
+                    for a in sorted_actions
+                    if int(a.get('index', 0)) != 0]
 
             max_idx = 0
             for a in actions:
@@ -1289,7 +1348,7 @@ class VLMNavAgent(Agent):
             self.terminate_after_local = True
             return
 
-        # Set rewind root to the parent step and teleport there on next tick
+        # 3) Arm the rewind root so top-of-step() will teleport and execute from parent_step
         self.tree_root_state = restored
         self.tree_root_a_final = a_final
         self.tree_action_queue = remaining
@@ -1470,6 +1529,8 @@ class VLMNavAgent(Agent):
 
         self.parent_by_step = {}
         self.swipping_back = False
+
+        self.path_length_m = 0.0    
 
 
 
@@ -2177,22 +2238,61 @@ class VLMNavAgent(Agent):
         self.parent_by_step[step_number] = parent
 
 
+        if parent is not None:
+            prev_log = self.step_action_log_history_dict.get(parent)
+        else:
+            prev_log = None
+
+
+
+
 
 
 
         log_entry = {
-            "step": step_number,
-            # "position": [round(float(p), 2) for p in pos],
-            "position": [round(float(p), 6) for p in pos],
+            "step": int(step_number),
+            "position": [float(pos[0]), float(pos[1]), float(pos[2])],
             "rotation": [float(rot.w), float(rot.x), float(rot.y), float(rot.z)],
-            "grid_current": grid_current,
             "grid_from": grid_from,
-            "actions": actions
+            "grid_current": grid_current if 'grid_current' in locals() else None,
+            "actions": actions,
+            "parent": parent,
         }
+
 
         # Save to log
         self.step_action_log_history_dict[step_number] = log_entry
         self.step_action_log.append(log_entry)
+
+
+
+        if prev_log is not None:
+
+            p_prev = np.array(prev_log["position"], dtype=np.float32)
+            p_curr = np.array(log_entry["position"], dtype=np.float32)
+            step_dist = float(np.linalg.norm(p_curr - p_prev))
+
+            self.path_length_m += step_dist
+
+
+
+            log_entry["path_length_so_far"] = self.path_length_m
+
+            print(
+                f"🚶 Forward travel {parent} → {step_number}: "
+                f"{step_dist:.3f} m (total={self.path_length_m:.3f} m)"
+            )
+        else:
+            log_entry["path_length_so_far"] = self.path_length_m
+
+
+
+
+
+
+
+
+
 
         # Print human-readable format
         print(f"Step {log_entry['step']}")

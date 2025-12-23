@@ -158,7 +158,7 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        # episode_ndx = 203
+        episode_ndx = 8
 
 
         obs = self._initialize_episode(episode_ndx)
