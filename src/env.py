@@ -158,7 +158,7 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        episode_ndx = 8
+        # episode_ndx = 8
 
 
         obs = self._initialize_episode(episode_ndx)
@@ -616,6 +616,10 @@ class ObjectNavEnv(Env):
             'view_positions': view_positions
         }
         self.init_pos = np.array(episode['start_position'])
+
+        print(f"ddddddddddddddddddddddddddddddddddddddddddddddddddddddataset geodesic_distance (start → closest goal): "
+        f"{episode['info']['geodesic_distance']:.3f} m")
+
 
 
         ######################################### extract map #############################################

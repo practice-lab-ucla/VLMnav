@@ -111,7 +111,7 @@ class VLMNavAgent(Agent):
 
     def __init__(self, cfg: dict):
 
-
+        self.geodesic_start_to_goal = None
         self._saved_goal_image = False
 
 
@@ -1265,6 +1265,33 @@ class VLMNavAgent(Agent):
 
 
 
+    def _compute_start_to_current_geodesic(self, obs):
+        agent_state = obs['agent_state']
+        curr_pos = np.array(agent_state.position, dtype=np.float32)
+
+        # Make sure you have stored the initial position on step 0
+        if self.step_ndx == 0 or self.init_pos is None:
+            self.init_pos = np.array(agent_state.position, dtype=np.float32)
+
+        pf = self.simWrapper.sim.pathfinder
+
+        # --- Compute full shortest path from start → current ---
+        shortest_path = habitat_sim.ShortestPath()
+        shortest_path.requested_start = np.array(self.init_pos, dtype=np.float32)
+        shortest_path.requested_end = curr_pos
+
+        found = pf.find_path(shortest_path)
+
+        if found:
+            dist_start_to_curr = float(shortest_path.geodesic_distance)
+            print(f"📏 Geodesic distance (l_i) from START to CURRENT: {dist_start_to_curr:.3f} m")
+            print(f"✅ shortest_path.geodesic_distance: {shortest_path.geodesic_distance:.3f} m")
+            print(f"✅ shortest_path.points:\n{np.array(shortest_path.points)}")
+        else:
+            print("⚠️ No navigable path found between start and current position.")
+            dist_start_to_curr = float('inf')
+
+        return dist_start_to_curr
 
 
 
@@ -1454,6 +1481,7 @@ class VLMNavAgent(Agent):
 
     def reset(self):
 
+        self.geodesic_start_to_goal = None
         self._saved_goal_image = False
 
 
@@ -1493,10 +1521,6 @@ class VLMNavAgent(Agent):
         self.adjusted_score = {}
         self.turnaround_streak = 0
         
-
-
-        self.first_reach = False
-
 
 
 
@@ -3020,6 +3044,22 @@ class ObjectNavAgent(VLMNavAgent):
             self.goal_reached = True
 
             self._save_goal_image_once(obs)
+
+
+
+
+
+
+
+            if self.geodesic_start_to_goal is None:
+                self.geodesic_start_to_goal = self._compute_start_to_current_geodesic(obs)
+
+
+
+
+
+
+
 
 
 
