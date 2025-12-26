@@ -83,9 +83,9 @@ agent_cfg:
       # model: gemini-1.5-flash-001
 
 
-      # model: gpt-4o-mini 
+      model: gpt-4o-mini 
 
-      model: gpt-5-nano
+      # model: gpt-5-nano
       # model: gpt-5.2-chat-latest
 
       
@@ -129,3 +129,5 @@ env_cfg:
   parallel: false
   name: default
   port: 5000 # port for the flask server to aggreagte results from instances
+
+  d_goal: 2.0
