@@ -9,16 +9,16 @@ import math
 import random
 
 # ========================== CONFIG ==========================
-WAVE_SIZE = 10
-NUM_WAVES = 10
-MAX_STEPS = 200
-
 # WAVE_SIZE = 10
-# NUM_WAVES = 2
-# MAX_STEPS = 2
+# NUM_WAVES = 10
+# MAX_STEPS = 200
 
-# Avoid sample from some range
-FORBIDDEN_RANGE = range(196, 223)
+WAVE_SIZE = 10
+NUM_WAVES = 2
+MAX_STEPS = 25
+
+# Avoid some range
+FORBIDDEN_RANGE = range(200, 221)
 
 # Total environments in the whole pool (global count seen by main.py)
 TOTAL_ENVIRONMENTS = 1000
@@ -42,7 +42,7 @@ if TOTAL_INSTANCES_LAUNCHED > TOTAL_ENVIRONMENTS:
         f"Requested {TOTAL_INSTANCES_LAUNCHED} instances but only {TOTAL_ENVIRONMENTS} environments available."
     )
 
-# Avoid sampling from a specific forbidden range 
+# Avoid sampling from a specific forbidden range (e.g., 200–220)
 valid_ids = [i for i in range(TOTAL_ENVIRONMENTS) if i not in FORBIDDEN_RANGE]
 
 # Choose random unique instance IDs from the valid pool
@@ -126,10 +126,13 @@ if __name__ == "__main__":
     minutes, seconds = divmod(elapsed.total_seconds(), 60)
     print(f"🏁 All planned instances finished. Total runtime: {int(minutes)} min {int(seconds)} sec")
 
-    # === Combine worker CSVs (unchanged) ===
+
+
+    # === Combine worker CSVs ===
     try:
         combined_out = Path(WORKER_LOG_DIR) / "combined_workers.csv"
         combined_out.parent.mkdir(parents=True, exist_ok=True)
+
         worker_files = sorted(Path(WORKER_LOG_DIR).glob("worker_*.csv"))
         if not worker_files:
             print("[combine] No worker_*.csv files found. Skipping merge.")
@@ -140,15 +143,37 @@ if __name__ == "__main__":
                     reader = csv.DictReader(fp)
                     for r in reader:
                         rows.append({
-                            "worker_id": f.stem.split("_")[-1],
+                            # If you want to SKIP worker_id, remove this key and from fieldnames below
+                            # "worker_id": f.stem.split("_")[-1],
+
                             "episode_ndx": r.get("episode_ndx", ""),
                             "scene_id": r.get("scene_id", ""),
+                            "run_result": r.get("run_result", ""),
+                            "distance_to_g": r.get("distance_to_g", ""),
+                            "dis_true": r.get("dis_true", ""),
+                            "real_true": r.get("real_true", ""),
                             "bfs_min": r.get("bfs_min", ""),
                         })
+
+            fieldnames = [
+                # "worker_id",
+                "episode_ndx",
+                "scene_id",
+                "run_result",
+                "distance_to_g",
+                "dis_true",
+                "real_true",
+                "bfs_min",
+            ]
+
             with combined_out.open("w", newline="", encoding="utf-8") as fp:
-                writer = csv.DictWriter(fp, fieldnames=["worker_id", "episode_ndx", "scene_id", "bfs_min"])
+                writer = csv.DictWriter(fp, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(rows)
+
             print(f"[combine] Wrote {combined_out}")
     except Exception as e:
         print(f"[combine] ERROR while combining worker CSVs: {e}")
+
+
+
