@@ -128,7 +128,7 @@ class VLMNavAgent(Agent):
 
 
         self.goal_reached = False 
-        self.run_result = "No"
+        self.run_result = False
         self.steps_taken = 0
 
 
@@ -1487,7 +1487,7 @@ class VLMNavAgent(Agent):
 
 
         self.goal_reached = False 
-        self.run_result = "No"
+        self.run_result = False
         self.steps_taken = 0
         self.tree_action_queue = []
         self.tree_root_state = None
@@ -3063,7 +3063,7 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-            self.run_result = "Yes" 
+            self.run_result = True 
             self.steps_taken = self.step_ndx
 
             self.goal_steps.add(self.step_ndx)
