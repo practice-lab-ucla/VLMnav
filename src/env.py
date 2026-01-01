@@ -158,7 +158,7 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        # episode_ndx = 8
+        episode_ndx = 8
 
 
         obs = self._initialize_episode(episode_ndx)
@@ -170,14 +170,6 @@ class Env:
 
         for _ in range(self.cfg['max_steps']):
             try:
-
-
-
-                # # agent_action = self._step_env(obs)
-                # agent_action = self._step_env(obs, episode_ndx)
-                # if agent_action is None:
-                #     break
-                # obs = self.simWrapper.step(agent_action)
 
 
 
@@ -211,7 +203,7 @@ class Env:
                 #### if we dont want the conf score to discourage the distance set the second entry to 0
             
                 agent_action = self.agent._adjust_action_distance(agent_action, 1.0)
-                print("111111111111111111111111111111111111111111111111111111111111111111111111111111111")
+
 
                 obs = self.simWrapper.step(agent_action)
 
@@ -616,41 +608,7 @@ class ObjectNavEnv(Env):
             'view_positions': view_positions
         }
         self.init_pos = np.array(episode['start_position'])
-
-        print(f"ddddddddddddddddddddddddddddddddddddddddddddddddddddddataset geodesic_distance (start → closest goal): "
-        f"{episode['info']['geodesic_distance']:.3f} m")
-
-
-
-        ######################################### extract map #############################################
-        height = float(self.init_pos[1])  # agent's initial y-position
-        scene_path = self.sim_cfg["scene_path"]
-
-        # scene_path = "data/scene_datasets/hm3d/val/00877-4ok3usBNeis/4ok3usBNeis.basis.glb"
-        occupancy_map, map_origin = extract_and_save_topdown_map(scene_path, height=height)
-
-        self.cfg['map_origin'] = map_origin
-        self.agent.cfg['map_origin'] = self.cfg['map_origin']
-
-        print(f"✅ In env.py, map generated at height {height:.2f} from scene: {scene_path}")
-        #######################################################################################################
-
-
-
-        ######################################### overrride with rand ###################################
-
-        # self.init_pos = np.array([ 5.16, 2.06, 3.37])
-
-
-
         
-        ##### save the height and will use in agent.py later #######
-        self.cfg['rrt_map_height'] = float(self.init_pos[1])
-        self.agent.cfg['rrt_map_height'] = self.cfg['rrt_map_height']
-
-
-
-
         rotation = episode['start_rotation']
 
 
