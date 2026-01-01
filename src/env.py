@@ -368,7 +368,23 @@ class Env:
         """
         metrics = {}
         self.path_calculator.requested_start = agent_state.position
-        metrics['distance_to_goal'] = self.simWrapper.get_path(self.path_calculator)
+
+
+        current_distance = self.simWrapper.get_path(self.path_calculator)
+
+        # ✅ Update distance_to_goal only before the first reach.
+        # Once agent.first_reach is True, keep the first distance we had.
+        if not getattr(self.agent, "first_reach", False):
+            self.distance_to_goal = current_distance
+
+        # Log the (possibly frozen) distance
+        metrics['distance_to_goal'] = self.distance_to_goal
+
+
+
+
+
+
 
         self.distance_to_goal = metrics['distance_to_goal'] 
         

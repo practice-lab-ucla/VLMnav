@@ -214,7 +214,6 @@ class VLMNavAgent(Agent):
 
 
         self.focal_length = calculate_focal_length(self.fov, self.resolution[1])
-        print("fovvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",self.fov)
         self.scale = cfg['map_scale']
         self._initialize_vlms(cfg['vlm_cfg'])       
         self.pivot = PIVOT(self.actionVLM, self.fov, self.resolution, max_action_length=cfg['max_action_dist']) if cfg['pivot'] else None
@@ -3510,34 +3509,7 @@ class ObjectNavAgent(VLMNavAgent):
             #                 f"{{'done': <1 or 0>, 'global_semantic_score': <float between 0.0 and 1.0>}}"
             #             )
             
-            # stopping_prompt = (
-            #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-            #                     f"Your job is to decide if the agent is NOT FAR from a {goal}, based ONLY on what is VISIBLE in the image."
-            #                     f"Important: a chair is NOT a sofa, and a sofa is NOT a bed. Do NOT infer the {goal} from the room type or context.\n"
 
-            #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
-
-            #                     f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
-            #                     f"- Return 1 ONLY if the {goal} is clearly visible, and there is a clear path to it from the current view."
-            #                     f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
-
-            #                     f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
-            #                     f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
-            #                     f"High scores mean the scene has open, traversable, informative paths."
-            #                     f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
-
-            #                     f"Important rules for global_semantic_score:"
-            #                     f"- Do NOT increase the score just because the {goal} is visible."
-            #                     f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
-
-            #                     f"Examples:"
-            #                     f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-            #                     f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
-            #                     f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
-            #                     f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-            #                     f"After Step 3, immediately output this JSON line:"
-            #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
-            # )
 
             # stopping_prompt = (
             #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
@@ -3568,9 +3540,38 @@ class ObjectNavAgent(VLMNavAgent):
             #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
             # )
 
+            # stopping_prompt = (
+            #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
+            #                     f"Your job is to decide if the agent is NOT FAR from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
+            #                     f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
+
+            #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
+
+            #                     f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
+            #                     f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
+            #                     f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
+
+            #                     f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
+            #                     f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
+            #                     f"High scores mean the scene has open, traversable, informative paths."
+            #                     f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
+
+            #                     f"Important rules for global_semantic_score:"
+            #                     f"- Do NOT increase the score just because the {goal} is visible."
+            #                     f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
+
+            #                     f"Examples:"
+            #                     f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+            #                     f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+            #                     f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
+            #                     f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+            #                     f"After Step 3, immediately output this JSON line:"
+            #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
+            # )
+
             stopping_prompt = (
                                 f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-                                f"Your job is to decide if the agent is NOT FAR from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
+                                f"Your job is to decide if the agent is VERY CLOSE (less than 2 meters) from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
                                 f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
                                 f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
@@ -3596,8 +3597,6 @@ class ObjectNavAgent(VLMNavAgent):
                                 f"After Step 3, immediately output this JSON line:"
                                 f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
             )
-
-
 
 
 

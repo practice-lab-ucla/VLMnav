@@ -9,13 +9,10 @@ import math
 import random
 
 # ========================== CONFIG ==========================
-# WAVE_SIZE = 10
-# NUM_WAVES = 10
-# MAX_STEPS = 200
-
 WAVE_SIZE = 10
-NUM_WAVES = 2
-MAX_STEPS = 25
+NUM_WAVES = 10
+MAX_STEPS = 200
+
 
 # Avoid some range
 FORBIDDEN_RANGE = range(200, 221)
