@@ -44,6 +44,23 @@ def get_agent_heading_angle(agent_quat):
     return angle_deg % 360
 
 
+def rotate_quat_about_y(quat, delta_degrees: float):
+    """
+    Rotate a habitat_sim quaternion by delta_degrees about the global Y axis.
+    Returns a new habitat_sim quaternion.
+    """
+    quat_xyzw = np.array([quat.x, quat.y, quat.z, quat.w], dtype=np.float32)
+    base_rot = R.from_quat(quat_xyzw)                  # [x, y, z, w]
+    yaw_rot = R.from_euler("y", delta_degrees, degrees=True)
+
+    # Apply yaw in world frame; if left/right end up swapped, flip the signs.
+    new_rot = yaw_rot * base_rot
+
+    new_xyzw = new_rot.as_quat().astype(np.float32)    # [x, y, z, w]
+    return quat_from_coeffs(new_xyzw)
+
+
+
 class Agent:
     def __init__(self, cfg: dict):
         pass
@@ -113,7 +130,7 @@ class VLMNavAgent(Agent):
         self.cfg = cfg
         self.fov = cfg['sensor_cfg']['fov']
 
-
+        self.multi_view_offset_deg = cfg.get('multi_view_offset_deg', 30.75)
         
 
 
@@ -214,6 +231,7 @@ class VLMNavAgent(Agent):
 
 
         self.focal_length = calculate_focal_length(self.fov, self.resolution[1])
+        print("fovvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",self.fov)
         self.scale = cfg['map_scale']
         self._initialize_vlms(cfg['vlm_cfg'])       
         self.pivot = PIVOT(self.actionVLM, self.fov, self.resolution, max_action_length=cfg['max_action_dist']) if cfg['pivot'] else None
@@ -340,8 +358,19 @@ class VLMNavAgent(Agent):
 
 
             # Step 2: Refresh observation
-            obs = self.simWrapper.sim.get_sensor_observations(0)
+            # obs = self.simWrapper.sim.get_sensor_observations(0)
+            # obs['agent_state'] = agent.get_state()
+
+
+            sim = self.simWrapper.sim
+
+            # 👇 This line makes sure the OpenGL context is current
+            sim.step_world(0.0)
+
+            obs = sim.get_sensor_observations(0)
             obs['agent_state'] = agent.get_state()
+
+
 
             # ✅ Restore 'goal' if it was present
             if hasattr(self, "last_obs") and "goal" in self.last_obs:
@@ -1953,19 +1982,25 @@ class VLMNavAgent(Agent):
         self.actionVLM: VLM = vlm_cls(**cfg['model_kwargs'], system_instruction=system_instruction)
         self.stoppingVLM: VLM = vlm_cls(**cfg['model_kwargs'])
 
+
+
+
     def _run_threads(self, obs: dict, stopping_images: list[np.array], goal):
-        """Concurrently runs the stopping thread to determine if the agent should stop, and the preprocessing thread to calculate potential actions."""
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            preprocessing_thread = executor.submit(self._preprocessing_module, obs)
-            stopping_thread = executor.submit(self._stopping_module, stopping_images, goal)
+        """
+        Runs the stopping module and preprocessing module.
 
-            a_final, images = preprocessing_thread.result()
-            called_stop, stopping_response = stopping_thread.result()
+        NOTE: We intentionally **do not** run _preprocessing_module in a
+        background thread, because it calls Habitat's simulator / OpenGL
+        (e.g. via _capture_multi_view_triplet). The GL context lives on
+        the main thread, so those calls must stay on the main thread.
+        """
 
+        # 1) Run stopping module (no simulator / GL calls here)
+        called_stop, stopping_response = self._stopping_module(stopping_images, goal)
 
+        # 2) Run preprocessing module on the main thread
+        a_final, images = self._preprocessing_module(obs)
 
-        
-        
         if called_stop:
             logging.info('Model called stop')
             self.stopping_calls.append(self.step_ndx)
@@ -1978,33 +2013,6 @@ class VLMNavAgent(Agent):
                 )
                 images['color_sensor'] = new_image
 
-
-    # #### ensure the final print will not print the default arrow #####
-    #     if called_stop:
-    #         logging.info('Model called stop')
-    #         self.stopping_calls.append(self.step_ndx)
-
-    #         if self.cfg['navigability_mode'] != 'none' and self.cfg['project']:
-    #             new_image = obs['color_sensor'].copy()
-
-    #             # 🚫 Don't draw default arrows if goal is reached
-    #             if not self.goal_reached:
-    #                 a_final = self._project_onto_image(
-    #                     self._get_default_arrows(), new_image, obs['agent_state'],
-    #                     obs['agent_state'].sensor_states['color_sensor']
-    #                 )
-    #             else:
-    #                 a_final = []
-
-    #             images['color_sensor'] = new_image
-
-
-
-        
-
-
-
-
         step_metadata = {
             'action_number': -10,
             'success': 1,
@@ -2014,13 +2022,88 @@ class VLMNavAgent(Agent):
             'called_stopping': called_stop
         }
 
-
-
-
-
         return a_final, images, step_metadata, stopping_response
-    
 
+
+
+
+
+
+
+
+
+
+    
+    def _capture_multi_view_triplet(self, obs: dict) -> dict:
+        """
+        Take 3 real observations from the simulator:
+          - center: current heading (already in obs)
+          - left:   yaw -multi_view_offset_deg
+          - right:  yaw +multi_view_offset_deg
+
+        All three use the true camera FOV (69.5° from config).
+        We then horizontally concatenate them: [left | center | right].
+
+        Returns a dict with:
+          - 'color_sensor_center'
+          - 'color_sensor_left'
+          - 'color_sensor_right'
+          - 'color_sensor_triplet'
+        """
+        center_img = obs['color_sensor'].copy()
+        agent_state: habitat_sim.AgentState = obs['agent_state']
+
+        # If we don't have direct simulator access for some reason, fall back
+        # to just tiling the center view 3x.
+        if self.simWrapper is None or not hasattr(self.simWrapper, "sim"):
+            triplet = np.concatenate([center_img, center_img, center_img], axis=1)
+            return {
+                'color_sensor_center': center_img,
+                'color_sensor_left': center_img,
+                'color_sensor_right': center_img,
+                'color_sensor_triplet': triplet,
+            }
+
+        sim = self.simWrapper.sim
+        agent = sim.get_agent(0)
+
+        # Preserve the *true* sim state to restore later
+        orig_state = agent.get_state()
+        orig_pos = np.array(orig_state.position, dtype=np.float32)
+        orig_rot = orig_state.rotation
+
+        def get_view_at_yaw_offset(delta_deg: float) -> np.ndarray:
+            """Temporarily yaw the agent by delta_deg, render, then return image."""
+            new_quat = rotate_quat_about_y(orig_rot, delta_deg)
+            # Use SimWrapper so we go through the same abstraction you use elsewhere
+            self.simWrapper.set_state(pos=orig_pos, quat=new_quat)
+
+            # NOTE: your code elsewhere uses get_sensor_observations(0), so we match that.
+            sub_obs = sim.get_sensor_observations(0)
+            return sub_obs['color_sensor'].copy()
+
+        # Capture left and right views
+        left_img = get_view_at_yaw_offset(-self.multi_view_offset_deg)
+        right_img = get_view_at_yaw_offset(+self.multi_view_offset_deg)
+
+        # Restore the original state (so we don't actually rotate the robot)
+        self.simWrapper.set_state(pos=orig_pos, quat=orig_rot)
+
+        # Make sure all 3 images have the same height before concatenation
+        min_h = min(center_img.shape[0], left_img.shape[0], right_img.shape[0])
+        center_img = center_img[:min_h]
+        left_img = left_img[:min_h]
+        right_img = right_img[:min_h]
+
+        triplet = np.concatenate([left_img, center_img, right_img], axis=1)
+
+        return {
+            'color_sensor_center': center_img,
+            'color_sensor_left': left_img,
+            'color_sensor_right': right_img,
+            'color_sensor_triplet': triplet,
+        }
+   
 
 
 
@@ -2059,26 +2142,27 @@ class VLMNavAgent(Agent):
             a_final = self._action_proposer(a_initial, agent_state)
 
 
-            # print(f"debug here ################################### 2",a_final)
-        
-        # print("After _action_proposer (a_final):")
-        # for mag, theta in a_final:
-        #     print(f"  θ = {np.rad2deg(theta):.2f}°, r = {mag:.2f}")
+
+        # a_final_projected = self._projection(a_final, images, agent_state)
+
+        # images['voxel_map'] = self._generate_voxel(a_final_projected, agent_state=agent_state)
+        # return a_final_projected, images
+
 
 
         a_final_projected = self._projection(a_final, images, agent_state)
 
-
-        # print("After projection (a_final_projected):")
-        # for mag, theta in a_final_projected:
-        #     print(f"  θ = {np.rad2deg(theta):.2f}°, r = {mag:.2f}")
-
-
-
-
+        # Build true multi-view observations by *actually* rotating the agent
+        # ±multi_view_offset_deg and re-rendering, then fusing.
+        try:
+            multi_view_images = self._capture_multi_view_triplet(obs)
+            images.update(multi_view_images)
+        except Exception as e:
+            logging.error(f"Failed to build multi-view triplet: {e}")
 
         images['voxel_map'] = self._generate_voxel(a_final_projected, agent_state=agent_state)
         return a_final_projected, images
+
 
     def _stopping_module(self, stopping_images: list[np.array], goal):
         """Determines if the agent should stop and prints confidence scores."""
@@ -2405,7 +2489,14 @@ class VLMNavAgent(Agent):
         prompt_type = 'action' if self.cfg['project'] else 'no_project'
         action_prompt = self._construct_prompt(goal, prompt_type, num_actions=len(a_final))
 
-        prompt_images = [images['color_sensor']]
+        # prompt_images = [images['color_sensor']]
+        # if 'goal_image' in images:
+        #     prompt_images.append(images['goal_image'])
+
+
+        base_image = images.get('color_sensor_triplet', images['color_sensor'])
+
+        prompt_images = [base_image]
         if 'goal_image' in images:
             prompt_images.append(images['goal_image'])
 

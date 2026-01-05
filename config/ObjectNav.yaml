@@ -70,6 +70,9 @@ agent_cfg:
   Depth_aware: True
 
 
+  multi_view_offset_deg: 30.75
+
+
 
 
 
@@ -83,9 +86,9 @@ agent_cfg:
       # model: gemini-1.5-flash-001
 
 
-      # model: gpt-4o-mini 
+      model: gpt-4o-mini 
 
-      model: gpt-5-nano
+      # model: gpt-5-nano
       # model: gpt-5.2-chat-latest
 
       
@@ -114,8 +117,8 @@ sim_cfg:
     height: 0.9
     pitch: -0.45
     res_factor: 1
-    fov: 131
-    # fov: 127
+    # fov: 131
+    fov: 69.5
     # fov: 101
 
 env_cfg:
