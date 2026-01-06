@@ -1987,7 +1987,7 @@ class VLMNavAgent(Agent):
 
     def _run_threads(self, obs: dict, stopping_images: list[np.array], goal):
         """
-        Runs the stopping module and preprocessing module.
+        Runs the preprocessing module and stopping module.
 
         NOTE: We intentionally **do not** run _preprocessing_module in a
         background thread, because it calls Habitat's simulator / OpenGL
@@ -1995,11 +1995,18 @@ class VLMNavAgent(Agent):
         the main thread, so those calls must stay on the main thread.
         """
 
-        # 1) Run stopping module (no simulator / GL calls here)
-        called_stop, stopping_response = self._stopping_module(stopping_images, goal)
-
-        # 2) Run preprocessing module on the main thread
+        # 1) Run preprocessing module on the main thread
+        #    (this builds the multi-view triplet inside `images`)
         a_final, images = self._preprocessing_module(obs)
+
+        # 2) Choose images for the stopping VLM.
+        #    Prefer the true multi-view triplet if available; otherwise fall back.
+        if 'color_sensor_triplet' in images:
+            stopping_images = [images['color_sensor_triplet']]
+
+
+        # 3) Run stopping module (no simulator / GL calls here)
+        called_stop, stopping_response = self._stopping_module(stopping_images, goal)
 
         if called_stop:
             logging.info('Model called stop')
@@ -2023,7 +2030,6 @@ class VLMNavAgent(Agent):
         }
 
         return a_final, images, step_metadata, stopping_response
-
 
 
 
@@ -2083,8 +2089,8 @@ class VLMNavAgent(Agent):
             return sub_obs['color_sensor'].copy()
 
         # Capture left and right views
-        left_img = get_view_at_yaw_offset(-self.multi_view_offset_deg)
-        right_img = get_view_at_yaw_offset(+self.multi_view_offset_deg)
+        left_img = get_view_at_yaw_offset(+self.multi_view_offset_deg)
+        right_img = get_view_at_yaw_offset(-self.multi_view_offset_deg)
 
         # Restore the original state (so we don't actually rotate the robot)
         self.simWrapper.set_state(pos=orig_pos, quat=orig_rot)
@@ -2489,18 +2495,30 @@ class VLMNavAgent(Agent):
         prompt_type = 'action' if self.cfg['project'] else 'no_project'
         action_prompt = self._construct_prompt(goal, prompt_type, num_actions=len(a_final))
 
+
+
         # prompt_images = [images['color_sensor']]
         # if 'goal_image' in images:
         #     prompt_images.append(images['goal_image'])
 
 
-        base_image = images.get('color_sensor_triplet', images['color_sensor'])
+        prompt_images = [images['color_sensor_triplet']]
 
-        prompt_images = [base_image]
         if 'goal_image' in images:
             prompt_images.append(images['goal_image'])
 
+
+
+
+
+
+
+
+
+
+
         response = self.actionVLM.call_chat(self.cfg['context_history'], prompt_images, action_prompt)
+
 
         logging_data = {}
         try:
@@ -3239,102 +3257,6 @@ class VLMNavAgent(Agent):
 
 
 
-class GOATAgent(VLMNavAgent):
- 
-    def _choose_action(self, obs: dict):
-        agent_state = obs['agent_state']
-        goal = obs['goal']
-
-        if goal['mode'] == 'image':
-            stopping_images = [obs['color_sensor'], goal['goal_image']]
-        else:
-            stopping_images = [obs['color_sensor']]
-
-        a_final, images, step_metadata, stopping_response = self._run_threads(obs, stopping_images, goal)
-        if goal['mode'] == 'image':
-            images['goal_image'] = goal['goal_image']
-
-        step_metadata.update({
-            'goal': goal['name'],
-            'goal_mode': goal['mode']
-        })
-
-        # If model calls stop two times in a row, we return the stop action and terminate the episode
-        if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
-            step_metadata['action_number'] = -1
-            agent_action = PolarAction.stop
-            logging_data = {}
-        else:
-            if self.pivot is not None:
-                pivot_instruction = self._construct_prompt(goal, 'pivot')
-                agent_action, pivot_images = self.pivot.run(
-                    obs['color_sensor'], pivot_instruction,
-                    agent_state, agent_state.sensor_states['color_sensor'],
-                    goal_image=goal['goal_image'] if goal['mode'] == 'image' else None
-                )
-                images.update(pivot_images)
-                logging_data = {}
-                step_metadata['action_number'] = -100
-            else:
-                step_metadata, logging_data, _ = self._prompting(goal, a_final, images, step_metadata)
-                agent_action = self._action_number_to_polar(step_metadata['action_number'], list(a_final))
-
-        logging_data['STOPPING RESPONSE'] = stopping_response
-        metadata = {
-            'step_metadata': step_metadata,
-            'logging_data': logging_data,
-            'a_final': a_final,
-            'images': images
-        }
-        return agent_action, metadata
-    
-    def _construct_prompt(self, goal: dict, prompt_type: str, num_actions=0):
-        """Constructs the prompt, depending on the goal modality. """
-        if goal['mode'] == 'object':
-            task = f'Navigate to the nearest {goal["name"]}'
-            first_instruction = f'Find the nearest {goal["name"]} and navigate as close as you can to it. '
-        if goal['mode'] == 'description':
-            first_instruction = f"Find and navigate to the {goal['lang_desc']}. Navigate as close as you can to it. "
-            task = first_instruction
-        if goal['mode'] == 'image':
-            task = f'Navigate to the specific {goal["name"]} shown in the image labeled GOAL IMAGE. Pay close attention to the details, and note you may see the object from a different angle than in the goal image. Navigate as close as you can to it '
-            first_instruction = f"Observe the image labeled GOAL IMAGE. Find this specific {goal['name']} shown in the image and navigate as close as you can to it. "
-
-        if prompt_type == 'stopping':        
-            stopping_prompt = (f"The agent has the following navigation task: \n{task}\n. The agent has sent you an image taken from its current location{' as well as the goal image. ' if goal['mode'] == 'image' else '. '} "
-                                f'Your job is to determine whether the agent is close to the specified {goal["name"].upper()}'
-                                f"First, tell me what you see in the image, and tell me if there is a {goal['name']} that matches the description. Then, return 1 if the agent is close to the {goal['name']}, and 0 if it isn't. Format your answer in the json {{'done': <1 or 0>}}")
-            return stopping_prompt
-
-        if prompt_type == 'pivot':
-            return f'{first_instruction} Use your prior knowledge about where items are typically located within a home. '
-        
-        if prompt_type == 'no_project':
-            baseline_prompt = (f"TASK: {first_instruction} use your prior knowledge about where items are typically located within a home. "
-                        "You have four possible actions: {0: Turn completely around, 1: Turn left, 2: Move straight ahead, 3: Turn right}. "
-                        f"First, tell me what you see, and if you have any leads on finding the {goal['name']}. Second, tell me which general direction you should go in. "
-                        f"Lastly, explain which action acheives that best, and return it as {{'action': <action_key>}}. Note you CANNOT GO THROUGH CLOSED DOORS, and you DO NOT NEED TO GO UP OR DOWN STAIRS"             
-            )
-            return baseline_prompt
-        
-        if prompt_type == 'action':
-            action_prompt = (f"TASK: {first_instruction} use your prior knowledge about where items are typically located within a home. "
-            f"There are {num_actions-1} red arrow(s) superimposed onto your observation, which represent potential actions. " 
-            f"These are labeled with a number in a white circle, which represent the location you would move to if you took that action. {'NOTE: choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS.' if self.step_ndx - self.turned >= self.cfg['turn_around_cooldown'] else ''}"
-            f"First, tell me what you see, and if you have any leads on finding the {goal['name']}. Second, tell me which general direction you should go in. "
-            f"Lastly, explain which action is the best and return it as {{'action': <action_key>}}. Note you CANNOT GO THROUGH CLOSED DOORS, and you DO NOT NEED TO GO UP OR DOWN STAIRS"
-            )
-            return action_prompt
-
-        raise ValueError('Prompt type must be stopping, pivot, no_project, or action')
-
-    def reset_goal(self):
-        """Called after every subtask of GOAT. Notably does not reset the voxel map, only resets all areas to be unexplored"""
-        self.stopping_calls = [self.step_ndx-2]
-        self.explored_map = np.zeros_like(self.explored_map)
-        self.turned = self.step_ndx - self.cfg['turn_around_cooldown']
-
-
 class ObjectNavAgent(VLMNavAgent):
 
 
@@ -3457,30 +3379,6 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-
-
-            # # ⛔ Only stop if backtrack failed
-            # print("🛑 No backtrack options — stopping agent.")
-            # step_metadata['action_number'] = -1
-            # agent_action = PolarAction.stop
-
-
-            # logging_data = {}
-
-
-            # print("stooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooop")
-
-            # logging_data['STOPPING RESPONSE'] = stopping_response
-            # metadata = {
-            #     'step_metadata': step_metadata,
-            #     'logging_data': logging_data,
-            #     'a_final': a_final,
-            #     'images': images
-
-            # }
-
-
-            # return agent_action, metadata
 
 
 
@@ -3687,6 +3585,8 @@ class ObjectNavAgent(VLMNavAgent):
                                 f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
                                 f"After Step 3, immediately output this JSON line:"
                                 f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
+                                f"{'in the end print the size of the image, also tell me if the image look like 3 images fused horizontally.'}"
+
             )
 
 
@@ -3742,7 +3642,9 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Do NOT normalize or force the scores to sum to 1. "
                 f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
                 f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            )
+                f"{'in the end print the size of the image, also tell me if the image look like 3 images fused horizontally. You should not be able to see the action number on the image with red arrow, tell me if you see it'}"
+
+            )   
 
 
 
