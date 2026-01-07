@@ -2034,6 +2034,49 @@ class VLMNavAgent(Agent):
 
 
 
+    def _get_obs_at_yaw_offset(self, base_obs: dict, delta_deg: float) -> dict:
+        """
+        Return a new obs dict for a yaw-rotated agent:
+        - delta_deg = 0 uses the original obs
+        - non-zero rotates the agent by delta_deg, gets new sensor readings,
+            then restores the original state.
+        """
+        # For the center view, just reuse the current obs
+        if abs(delta_deg) < 1e-3:
+            return base_obs.copy()
+
+        # If we can't touch the sim, just return the original obs as a fallback
+        if self.simWrapper is None or not hasattr(self.simWrapper, "sim"):
+            return base_obs.copy()
+
+        sim = self.simWrapper.sim
+        agent = sim.get_agent(0)
+
+        # Save original state
+        orig_state = agent.get_state()
+        orig_pos = np.array(orig_state.position, dtype=np.float32)
+        orig_rot = orig_state.rotation
+
+        # Rotate yaw
+        new_quat = rotate_quat_about_y(orig_rot, delta_deg)
+        self.simWrapper.set_state(pos=orig_pos, quat=new_quat)
+
+        # Get new sensor observations at this yaw
+        sub_obs = sim.get_sensor_observations(0)
+
+        # Build a new obs dict for this view
+        view_obs = base_obs.copy()
+        view_obs['agent_state'] = agent.get_state()
+        view_obs['color_sensor'] = sub_obs['color_sensor']
+
+        # If you have depth, include it too (needed for navigability)
+        if 'depth_sensor' in sub_obs:
+            view_obs['depth_sensor'] = sub_obs['depth_sensor']
+
+        # Restore original state
+        self.simWrapper.set_state(pos=orig_pos, quat=orig_rot)
+
+        return view_obs
 
 
 
@@ -2139,20 +2182,61 @@ class VLMNavAgent(Agent):
                 (self.cfg['max_action_dist'], 0.28 * np.pi),
                 (self.cfg['max_action_dist'], 0.36 * np.pi)
             ]
-        else: 
-            a_initial = self._navigability(obs)
 
-            # print(f"debug here ################################### 1",a_initial)
+        else:
+            # Compute actions for 3 yawed observations: left, center, right
+            yaw_offsets = [
+                0.0,                          # center
+                +self.multi_view_offset_deg,  # left
+                -self.multi_view_offset_deg,  # right
+            ]
+            view_names = ["center", "left", "right"]
+
+            a_initial_list = []
+            a_final_list = []
+            view_obs_list = []
+
+            for delta_deg, view_name in zip(yaw_offsets, view_names):
+                # For center, just reuse the original obs to avoid extra sim calls
+                if abs(delta_deg) < 1e-3:
+                    view_obs = obs
+                else:
+                    # This helper returns a *full* obs dict at the new yaw:
+                    # agent_state, color_sensor, depth_sensor, etc.
+                    view_obs = self._get_obs_at_yaw_offset(obs, delta_deg)
+
+                view_agent_state = view_obs['agent_state']
+
+                # 1) navigability on this *specific* view
+                a_initial_view = self._navigability(view_obs)
+
+                # 2) action proposer on this view
+                a_final_view = self._action_proposer(a_initial_view, view_agent_state)
+
+                a_initial_list.append(a_initial_view)
+                a_final_list.append(a_final_view)
+                view_obs_list.append(view_obs)
+
+                # 3) PROJECT ACTIONS *ON THIS VIEW'S IMAGE* AND SAVE IT
+                #    This is the only thing needed for saving – env.py will
+                #    automatically write these to disk.
+                view_img = view_obs['color_sensor'].copy()
+                self._project_onto_image(
+                    a_final_view,
+                    view_img,
+                    view_agent_state,
+                    view_agent_state.sensor_states['color_sensor'],
+                )
+                images[f"color_sensor_{view_name}_projected"] = view_img
+
+            # Keep using the CENTER view actions as the "main" ones
+            # for the rest of the pipeline (_projection, voxel, etc.)
+            a_initial_center = a_initial_list[1]
+            a_final = a_final_list[1]
 
 
-            a_final = self._action_proposer(a_initial, agent_state)
 
 
-
-        # a_final_projected = self._projection(a_final, images, agent_state)
-
-        # images['voxel_map'] = self._generate_voxel(a_final_projected, agent_state=agent_state)
-        # return a_final_projected, images
 
 
 
