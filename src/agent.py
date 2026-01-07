@@ -2218,6 +2218,19 @@ class VLMNavAgent(Agent):
                 a_final_list.append(a_final_view)
                 view_obs_list.append(view_obs)
 
+
+            for view_name, a_final_view in zip(view_names, a_final_list):
+                print(f"\n[DEBUG] proposed actions in {view_name} frame:")
+                for i, (r, theta) in enumerate(a_final_view):
+                    print(
+                        f"  {view_name}[{i}]: "
+                        f"r = {r:.3f} m, "
+                        f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}°)"
+                    )
+
+
+
+
             # Center is index 0 (yaw_offsets[0] == 0.0)
             # ---------- Build unified a_final in CENTER frame ----------
             # Indices in the PASS 1 lists
@@ -2237,7 +2250,7 @@ class VLMNavAgent(Agent):
                 # a_final_list[idx] is in that view's local frame;
                 # convert its angles into the center frame by adding delta_rad.
                 for r, theta in a_final_list[idx]:
-                    a_final_center_frame.append((r, theta + delta_rad))
+                    a_final_center_frame.append((r, theta - delta_rad))
 
             a_final = a_final_center_frame
 
@@ -2302,7 +2315,16 @@ class VLMNavAgent(Agent):
 
 
 
-        a_final_projected = self._projection(a_final, images, agent_state)
+        if self.cfg['navigability_mode'] == 'none':
+            a_final_projected = self._projection(a_final, images, agent_state)
+        else:
+            if "color_sensor_center_projected" in images:
+                images["color_sensor"] = images["color_sensor_center_projected"]
+
+            a_final_projected = {
+                (r, theta): idx + 1
+                for idx, (r, theta) in enumerate(a_final)
+            }
 
         # Build true multi-view observations by *actually* rotating the agent
         # ±multi_view_offset_deg and re-rendering, then fusing.
