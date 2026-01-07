@@ -2183,8 +2183,12 @@ class VLMNavAgent(Agent):
                 (self.cfg['max_action_dist'], 0.36 * np.pi)
             ]
 
+
+
+
         else:
-            # Compute actions for 3 yawed observations: left, center, right
+            # ---------- PASS 1: navigability + action proposer ----------
+            # Order: CENTER -> LEFT -> RIGHT  (voxel map updated in this order)
             yaw_offsets = [
                 0.0,                          # center
                 +self.multi_view_offset_deg,  # left
@@ -2201,42 +2205,100 @@ class VLMNavAgent(Agent):
                 if abs(delta_deg) < 1e-3:
                     view_obs = obs
                 else:
-                    # This helper returns a *full* obs dict at the new yaw:
-                    # agent_state, color_sensor, depth_sensor, etc.
                     view_obs = self._get_obs_at_yaw_offset(obs, delta_deg)
 
                 view_agent_state = view_obs['agent_state']
 
-                # 1) navigability on this *specific* view
+                # 1) navigability on this *specific* view (updates voxel map)
                 a_initial_view = self._navigability(view_obs)
 
                 # 2) action proposer on this view
                 a_final_view = self._action_proposer(a_initial_view, view_agent_state)
-
                 a_initial_list.append(a_initial_view)
                 a_final_list.append(a_final_view)
                 view_obs_list.append(view_obs)
 
-                # 3) PROJECT ACTIONS *ON THIS VIEW'S IMAGE* AND SAVE IT
-                #    This is the only thing needed for saving – env.py will
-                #    automatically write these to disk.
+            # Center is index 0 (yaw_offsets[0] == 0.0)
+            # ---------- Build unified a_final in CENTER frame ----------
+            # Indices in the PASS 1 lists
+            name_to_idx = {"center": 0, "left": 1, "right": 2}
+
+            # Keep center initial set if you need it elsewhere
+            a_initial_center = a_initial_list[name_to_idx["center"]]
+
+            # Combine all 3 views' actions into the CENTER frame.
+            # Order for the final list: LEFT -> CENTER -> RIGHT
+            a_final_center_frame = []
+            for view_name in ["left", "center", "right"]:
+                idx = name_to_idx[view_name]
+                delta_deg = yaw_offsets[idx]
+                delta_rad = np.deg2rad(delta_deg)
+
+                # a_final_list[idx] is in that view's local frame;
+                # convert its angles into the center frame by adding delta_rad.
+                for r, theta in a_final_list[idx]:
+                    a_final_center_frame.append((r, theta + delta_rad))
+
+            a_final = a_final_center_frame
+
+
+
+
+
+            print("\n[DEBUG] unified a_final in center frame (LEFT -> CENTER -> RIGHT):")
+            for i, (r, theta) in enumerate(a_final):
+                print(
+                    f"  a_final[{i}]: r = {r:.3f} m, "
+                    f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}°)"
+                )
+
+            # ---------- PASS 2: projection & numbering ----------
+            # Numbering order: LEFT -> CENTER -> RIGHT
+            action_index_offset = 0
+
+
+
+
+
+
+            for view_name in ["left", "center", "right"]:
+                idx = name_to_idx[view_name]
+                view_obs = view_obs_list[idx]
+                view_agent_state = view_obs['agent_state']
+                a_final_view = a_final_list[idx]
+
                 view_img = view_obs['color_sensor'].copy()
-                self._project_onto_image(
+
+                # left keeps TURN AROUND; center/right drop it
+                include_turnaround = (view_name == "left")
+
+                projected_actions = self._project_onto_image(
                     a_final_view,
                     view_img,
                     view_agent_state,
                     view_agent_state.sensor_states['color_sensor'],
+                    include_turnaround=include_turnaround,
+                    action_index_offset=action_index_offset,
                 )
                 images[f"color_sensor_{view_name}_projected"] = view_img
 
-            # Keep using the CENTER view actions as the "main" ones
-            # for the rest of the pipeline (_projection, voxel, etc.)
-            a_initial_center = a_initial_list[1]
-            a_final = a_final_list[1]
+                # bump offset so the next view's numbers keep increasing
+                action_index_offset += len(projected_actions)
 
 
+            # ---------- Stitch [left | center | right] into a projected triplet ----------
+            left_img = images["color_sensor_left_projected"]
+            center_img = images["color_sensor_center_projected"]
+            right_img = images["color_sensor_right_projected"]
 
+            # Match heights just in case
+            min_h = min(left_img.shape[0], center_img.shape[0], right_img.shape[0])
+            left_img = left_img[:min_h]
+            center_img = center_img[:min_h]
+            right_img = right_img[:min_h]
 
+            triplet_projected = np.concatenate([left_img, center_img, right_img], axis=1)
+            images["color_sensor_triplet_projected"] = triplet_projected
 
 
 
@@ -3081,7 +3143,16 @@ class VLMNavAgent(Agent):
             return end_px
         return None
 
-    def _project_onto_image(self, a_final: list, rgb_image: np.ndarray, agent_state: habitat_sim.AgentState, sensor_state: habitat_sim.SixDOFPose, chosen_action: int=None):
+    def _project_onto_image(
+        self,
+        a_final: list,
+        rgb_image: np.ndarray,
+        agent_state: habitat_sim.AgentState,
+        sensor_state: habitat_sim.SixDOFPose,
+        chosen_action: int = None,
+        include_turnaround: bool = True,
+        action_index_offset: int = 0,
+    ):
         """
         Projects a set of actions onto a single image. Keeps track of action-to-number mapping.
         """
@@ -3117,7 +3188,7 @@ class VLMNavAgent(Agent):
 
             end_px = self._can_project(r_i, theta_i, agent_state, sensor_state)
             if end_px is not None:
-                action_name = len(projected) + 1
+                action_name = action_index_offset + len(projected) + 1
                 projected[(r_i, theta_i)] = action_name
 
                 cv2.arrowedLine(rgb_image, tuple(start_px), tuple(end_px), RED, math.ceil(5 * scale_factor), tipLength=0.0)
@@ -3134,7 +3205,11 @@ class VLMNavAgent(Agent):
                 text_position = (circle_center[0] - text_width // 2, circle_center[1] + text_height // 2)
                 cv2.putText(rgb_image, text, text_position, font, text_size, text_color, text_thickness)
 
-        if (self.step_ndx - self.turned) >= self.cfg['turn_around_cooldown'] or self.step_ndx == self.turned or (chosen_action == 0):
+        if include_turnaround and (
+            (self.step_ndx - self.turned) >= self.cfg['turn_around_cooldown']
+            or self.step_ndx == self.turned
+            or (chosen_action == 0)
+        ):
             text = '0'
             text_size = 3.1 * scale_factor
             text_thickness = math.ceil(3 * scale_factor)
