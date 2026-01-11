@@ -148,7 +148,8 @@ def put_text_on_image(image, text, location, font=cv2.FONT_HERSHEY_SIMPLEX, text
     Returns:
         np.ndarray: Image with text added.
     """
-    scale_factor = image.shape[0] / 1080
+    # scale_factor = image.shape[0] / 1080
+    scale_factor = image.shape[0] / 480
     adjusted_thickness = math.ceil(scale_factor * text_thickness)
     adjusted_size = scale_factor * text_size
 
@@ -284,7 +285,9 @@ def create_gif(image_dir, interval=600):
         None: Saves the GIF animation in the directory.
     """
     # Create a figure that tightly matches the size of the images (1920x1080)
-    fig, ax = plt.subplots(figsize=(19.2, 10.8), dpi=100)
+    # fig, ax = plt.subplots(figsize=(19.2, 10.8), dpi=100)
+    fig, ax = plt.subplots(figsize=(6.4, 3.6), dpi=100)  # 6.4*100=640, 4.8*100=480
+
     ax.set_position([0, 0, 1, 1])  # Remove all padding
     ax.axis('off')
 
@@ -307,7 +310,9 @@ def create_gif(image_dir, interval=600):
             continue
 
     # Add a black frame at the end
-    black_frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    # black_frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+    black_frame = np.zeros((360, 640, 3), dtype=np.uint8)
     black_frame_rgb = cv2.cvtColor(black_frame, cv2.COLOR_BGR2RGB)
     frame_black = [ax.imshow(black_frame_rgb, animated=True)]
     frames.append(frame_black)

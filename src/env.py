@@ -345,9 +345,17 @@ class Env:
             if not step_metadata['success']:
                 path += '_ERROR'
             os.makedirs(path, exist_ok=True)
+
+
+            keep_images = {"color_sensor_triplet_projected", "color_sensor", "voxel_map"}
+
+
             for name, im in images.items():
+                if name not in keep_images:
+                    continue
                 im = Image.fromarray(im[:, :, 0:3], mode='RGB')
                 im.save(f'{path}/{name}.png')
+
             with open(f'{path}/details.txt', 'w') as file:
                 if step_metadata['success']:
                     for k, v in logging_data.items():

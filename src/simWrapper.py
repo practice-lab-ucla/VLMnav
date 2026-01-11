@@ -46,10 +46,12 @@ class SimWrapper:
         self.sensor_pitch = cfg['sensor_cfg']['pitch']
         self.fov = cfg['sensor_cfg']['fov']
         self.sensor_height = cfg['sensor_cfg']['height']
-        self.resolution = (
-            1080 // cfg['sensor_cfg']['res_factor'],
-            1920 // cfg['sensor_cfg']['res_factor']
-        )
+
+        # self.resolution = (
+        #     1080 // cfg['sensor_cfg']['res_factor'],
+        #     1920 // cfg['sensor_cfg']['res_factor']
+        # )
+        self.resolution = (360, 640)
 
         # Simulator configuration
         backend_cfg = habitat_sim.SimulatorConfiguration()

@@ -130,16 +130,17 @@ class VLMNavAgent(Agent):
         self.cfg = cfg
         self.fov = cfg['sensor_cfg']['fov']
 
-        self.multi_view_offset_deg = cfg.get('multi_view_offset_deg', 30.75)
+        self.multi_view_offset_deg = cfg.get('multi_view_offset_deg')
         
 
 
 
         self.simWrapper: SimWrapper = None
-        self.resolution = (
-            1080 // cfg['sensor_cfg']['res_factor'],
-            1920 // cfg['sensor_cfg']['res_factor']
-        )
+        # self.resolution = (
+        #     1080 // cfg['sensor_cfg']['res_factor'],
+        #     1920 // cfg['sensor_cfg']['res_factor']
+        # )
+        self.resolution = (360, 640)
 
 
         self.goal_reached = False 
@@ -2208,15 +2209,28 @@ class VLMNavAgent(Agent):
                     view_obs = self._get_obs_at_yaw_offset(obs, delta_deg)
 
                 view_agent_state = view_obs['agent_state']
+                delta_rad = np.deg2rad(delta_deg)
 
-                # 1) navigability on this *specific* view (updates voxel map)
-                a_initial_view = self._navigability(view_obs)
+                # 1) navigability on this specific view (updates voxel map)
+                #    For left/right, only keep rays that are OUTSIDE the center FOV.
+                restrict_nonoverlap = (view_name != "center")
+                a_initial_view = self._navigability(
+                    view_obs,
+                    delta_rad=delta_rad,
+                    restrict_to_nonoverlap=restrict_nonoverlap,
+                )
 
-                # 2) action proposer on this view
-                a_final_view = self._action_proposer(a_initial_view, view_agent_state)
+                # 2) Run the action proposer on this view's valid FOV.
+                a_final_view = self._action_proposer(
+                    a_initial_view,
+                    view_agent_state,
+                )
+
                 a_initial_list.append(a_initial_view)
                 a_final_list.append(a_final_view)
                 view_obs_list.append(view_obs)
+
+
 
 
             for view_name, a_final_view in zip(view_names, a_final_list):
@@ -2362,18 +2376,21 @@ class VLMNavAgent(Agent):
     
 
 
+    def _navigability(
+        self,
+        obs: dict,
+        delta_rad: float = 0.0,
+        restrict_to_nonoverlap: bool = False,
+    ):
+        """
+        Generates the set of navigability actions and updates the voxel map accordingly.
 
-
-    def _navigability(self, obs: dict):
-        """Generates the set of navigability actions and updates the voxel map accordingly."""
+        If restrict_to_nonoverlap is True, this observation is a side view (left/right)
+        and we only keep rays whose direction in the *center* camera frame lies
+        OUTSIDE the center camera FOV. The mapping from this view to the center
+        frame is given by delta_rad.
+        """
         agent_state: habitat_sim.AgentState = obs['agent_state']
-
-
-
-
-
-
-
 
         sensor_state = agent_state.sensor_states['color_sensor']
         rgb_image = obs['color_sensor']
@@ -2387,26 +2404,50 @@ class VLMNavAgent(Agent):
             rgb_image, depth_image, agent_state, sensor_state
         )
 
-        sensor_range =  np.deg2rad(self.fov / 2) * 1.5
+        sensor_range = np.deg2rad(self.fov / 2) * 1.5
+        center_half_fov_rad = np.deg2rad(self.fov / 2.0)
 
         all_thetas = np.linspace(-sensor_range, sensor_range, self.cfg['num_theta'])
         start = agent_frame_to_image_coords(
-            [0, 0, 0], agent_state, sensor_state,
-            resolution=self.resolution, focal_length=self.focal_length
+            [0, 0, 0],
+            agent_state,
+            sensor_state,
+            resolution=self.resolution,
+            focal_length=self.focal_length,
         )
 
         a_initial = []
         for theta_i in all_thetas:
-            r_i, theta_i = self._get_radial_distance(start, theta_i, navigability_mask, agent_state, sensor_state, depth_image)
+            # For side views, drop rays whose direction (expressed in the
+            # *center* frame) falls inside the center FOV.
+            if restrict_to_nonoverlap and abs(delta_rad) > 1e-3:
+                # Convert this view's local theta into the center-camera frame.
+                theta_center = theta_i - delta_rad
+                if -center_half_fov_rad <= theta_center <= center_half_fov_rad:
+                    # This ray overlaps the center FOV → skip it.
+                    continue
+
+            r_i, theta_i = self._get_radial_distance(
+                start,
+                theta_i,
+                navigability_mask,
+                agent_state,
+                sensor_state,
+                depth_image,
+            )
             if r_i is not None:
                 self._update_voxel(
-                    r_i, theta_i, agent_state,
-                    clip_dist=self.cfg['max_action_dist'], clip_frac=self.e_i_scaling
+                    r_i,
+                    theta_i,
+                    agent_state,
+                    clip_dist=self.cfg['max_action_dist'],
+                    clip_frac=self.e_i_scaling,
                 )
                 a_initial.append((r_i, theta_i))
 
         return a_initial
-    
+
+
 
 
     def _action_proposer(self, a_initial: list, agent_state: habitat_sim.AgentState):
@@ -3072,9 +3113,10 @@ class VLMNavAgent(Agent):
 
 
 
-    def _save_goal_image_once(self, obs: dict, out_dir: str = "logs/goal_image") -> None:
+    def _save_goal_image_once(self, obs: dict, images: dict = None, out_dir: str = "logs/goal_image") -> None:
         """
         Save the current RGB observation once (first time goal is reached).
+        By default, saves the multi-view triplet [left | center | right] if available.
         Filename: <episode_name>_<goalname>.png (auto-suffix _2, _3 if exists)
         """
         if getattr(self, "_saved_goal_image", False):
@@ -3104,18 +3146,28 @@ class VLMNavAgent(Agent):
             out_path = os.path.join(out_dir, f"{base}_{k}.png")
             k += 1
 
-        if "color_sensor" not in obs:
-            print("[WARN] no color_sensor in obs, cannot save goal image")
-            return
+        # ---- pick which image to save ----
+        img = None
 
-        img = obs["color_sensor"]
+        # Prefer the true multi-view triplet if we have it
+        if images is not None:
+            if "color_sensor_triplet" in images:
+                img = images["color_sensor_triplet"]
+            elif "color_sensor_triplet_projected" in images:
+                img = images["color_sensor_triplet_projected"]
+            elif "color_sensor" in images:
+                img = images["color_sensor"]
+
+
+
         if getattr(img, "dtype", None) != "uint8":
             img = img.astype("uint8")
 
         Image.fromarray(img).save(out_path)
-        print("✅ saved goal image:", out_path)
+        print("✅ saved goal image (triplet if available):", out_path)
 
         self._saved_goal_image = True
+
 
 
 
@@ -3178,6 +3230,7 @@ class VLMNavAgent(Agent):
         """
         Projects a set of actions onto a single image. Keeps track of action-to-number mapping.
         """
+        # scale_factor = rgb_image.shape[0] / 480    
         scale_factor = rgb_image.shape[0] / 1080
         font = cv2.FONT_HERSHEY_SIMPLEX
         text_color = BLACK
@@ -3504,7 +3557,7 @@ class ObjectNavAgent(VLMNavAgent):
                 self.first_reach = True
 
                 if self.first_reach == True:
-                    self._save_goal_image_once(obs)
+                    self._save_goal_image_once(obs, images)
                     
 
 
@@ -3741,6 +3794,7 @@ class ObjectNavAgent(VLMNavAgent):
 
             stopping_prompt = (
                                 f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
+                                f"The image is a fusion of three views from one position at different angles."
                                 f"Your job is to decide if the agent is VERY CLOSE (less than 2 meters) from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
                                 f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
@@ -3766,7 +3820,6 @@ class ObjectNavAgent(VLMNavAgent):
                                 f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
                                 f"After Step 3, immediately output this JSON line:"
                                 f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
-                                f"{'in the end print the size of the image, also tell me if the image look like 3 images fused horizontally.'}"
 
             )
 
@@ -3792,6 +3845,7 @@ class ObjectNavAgent(VLMNavAgent):
             
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
+
             # action_prompt = (
             #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
             #     f"Use your prior knowledge about where items are typically located within a home. "
@@ -3802,17 +3856,24 @@ class ObjectNavAgent(VLMNavAgent):
             #     f"Second, tell me which general direction you should go in. "
             #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
             #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-            #     f"'action' must be an integer not a string. "
+            #     f"The 'confident_score' list represents probabilities for each action "
+            #     f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
+            #     f"Do NOT normalize or force the scores to sum to 1. "
             #     f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-            #     f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
             #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            # )
+            #     f"{'in the end print the size of the image, also tell me if the image look like 3 images fused horizontally. You should not be able to see the action number on the image with red arrow, tell me if you see it'}"
+
+            # )   
+
+
+
 
             action_prompt = (
                 f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
+                f"The image is a fusion of three views from one position at different angles."
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "
@@ -3823,14 +3884,8 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Do NOT normalize or force the scores to sum to 1. "
                 f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
                 f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-                f"{'in the end print the size of the image, also tell me if the image look like 3 images fused horizontally. You should not be able to see the action number on the image with red arrow, tell me if you see it'}"
 
             )   
-
-
-
-
-
 
 
 
