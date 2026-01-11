@@ -503,11 +503,14 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
     def get_spend(self):
-        return self.actionVLM.get_spend() + self.stoppingVLM.get_spend()
+        # Sum the spend of all action VLMs plus the stopping VLM
+        action_spend = sum(v.get_spend() for v in getattr(self, "actionVLMs", [self.actionVLM]))
+        return action_spend + self.stoppingVLM.get_spend()
+
+
+
+
 
     def reset(self):
 
@@ -530,7 +533,8 @@ class VLMNavAgent(Agent):
         self.init_pos = None
         self._initial_pose = None
         self.turned = -self.cfg['turn_around_cooldown']
-        self.actionVLM.reset()
+        for v in getattr(self, "actionVLMs", [self.actionVLM]):
+            v.reset()
 
         # this will be passed to env.py
         self.teleport_step_flags = {}
@@ -595,15 +599,40 @@ class VLMNavAgent(Agent):
     def _choose_action(self, obs):
         raise NotImplementedError
 
+
+
     def _initialize_vlms(self, cfg: dict):
+        """
+        Initialize action VLMs (ensemble) and the stopping VLM.
+        cfg comes from agent_cfg['vlm_cfg'] in the yaml.
+        """
         vlm_cls = globals()[cfg['model_cls']]
         system_instruction = (
             "You are an embodied robotic assistant, with an RGB image sensor. You observe the image and instructions "
             "given to you and output a textual response, which is converted into actions that physically move you "
             "within the environment. You cannot move through closed doors. "
         )
-        self.actionVLM: VLM = vlm_cls(**cfg['model_kwargs'], system_instruction=system_instruction)
+
+        # How many action VLMs in the ensemble (default 1 if not set)
+        self.num_action_vlms = cfg.get('num_action_vlms', 1)
+
+        # Ensemble of action models
+        self.actionVLMs: list[VLM] = [
+            vlm_cls(**cfg['model_kwargs'], system_instruction=system_instruction)
+            for _ in range(self.num_action_vlms)
+        ]
+
+        # Keep the first one as a "canonical" handle (for name, pivot, etc.)
+        self.actionVLM: VLM = self.actionVLMs[0]
+
+        # Stopping still uses a single model
         self.stoppingVLM: VLM = vlm_cls(**cfg['model_kwargs'])
+
+
+
+
+
+
 
     def _run_threads(self, obs: dict, stopping_images: list[np.array], goal):
         """Concurrently runs the stopping thread to determine if the agent should stop, and the preprocessing thread to calculate potential actions."""
@@ -975,111 +1004,165 @@ class VLMNavAgent(Agent):
 
         return a_final_projected
         
-
-    def _prompting(self, goal, a_final: list, images: dict, step_metadata: dict):
+    def _prompting(self, goal, a_final, images: dict, step_metadata: dict):
         """
-        Prompting component of VLMNav. Constructs the textual prompt and calls the action model.
-        Parses the response for the chosen action number and confidence scores.
+        Prompting component of VLMNav using an ensemble of VLMs.
+        Each VLM proposes a single best action, then we majority-vote.
+        We also aggregate confidence scores for logging.
         """
 
+        # Make sure we can treat a_final as an indexable list of (r, theta).
+        # It may come in as a dict mapping (r, theta) -> action_id.
+        if isinstance(a_final, dict):
+            a_final_list = list(a_final.keys())
+        else:
+            a_final_list = list(a_final)
 
         prompt_type = 'action' if self.cfg['project'] else 'no_project'
-        action_prompt = self._construct_prompt(goal, prompt_type, num_actions=len(a_final))
+        action_prompt = self._construct_prompt(goal, prompt_type, num_actions=len(a_final_list))
 
         prompt_images = [images['color_sensor']]
         if 'goal_image' in images:
             prompt_images.append(images['goal_image'])
 
-        response = self.actionVLM.call_chat(self.cfg['context_history'], prompt_images, action_prompt)
-
         logging_data = {}
-        try:
-            response_dict = self._eval_response(response)
-            step_metadata['action_number'] = int(response_dict['action'])
 
+        # ====== ENSEMBLE CALLS ======
+        vlms = getattr(self, "actionVLMs", [self.actionVLM])
+        raw_responses = []
+        vote_actions = []       # one chosen action per VLM
+        conf_lists = []         # (optional) confident_score per VLM
+
+        for idx, vlm in enumerate(vlms):
+            resp = vlm.call_chat(self.cfg['context_history'], prompt_images, action_prompt)
+            raw_responses.append(resp)
+
+            try:
+                resp_dict = self._eval_response(resp)
+                # 1) chosen action from this VLM
+                a = int(resp_dict['action'])
+                vote_actions.append(a)
+
+                # 2) confidence list (optional, for aggregation)
+                conf_raw = resp_dict.get('confident_score', [])
+                conf_norm = VLMNavAgent.normalize_scores(conf_raw) if conf_raw else []
+                conf_lists.append(conf_norm)
+                print("\n🧠 Ensemble VLM #{:02d}".format(idx))
+                print(f"   raw response: {resp}")
+                print(f"   parsed action: {a}")
+                print(f"   raw confident_score: {conf_raw}")
+                print(f"   normalized confident_score: {conf_norm}")
+            except (KeyError, ValueError, TypeError) as e:
+                logging.error(f'Error parsing ensemble response from VLM {idx}: {e}')
+                conf_lists.append([])
+                print("\n⚠️ Ensemble VLM #{:02d} parsing error: {}".format(idx, e))
+                print("   raw response:", resp)
+
+        # ====== MAJORITY VOTE OVER ACTIONS ======
+        # Keep only clearly valid votes: 0..len(a_final_list)
+        valid_votes = [
+            a for a in vote_actions
+            if isinstance(a, int) and 0 <= a <= len(a_final_list)
+        ]
+
+        if valid_votes:
+            counts = Counter(valid_votes)
+            # Sort by (-frequency, action_index) for deterministic tie-breaking
+            majority_action, majority_count = sorted(
+                counts.items(),
+                key=lambda kv: (-kv[1], kv[0])
+            )[0]
+        else:
+            # Fallback if everything failed: choose 0 (turn around) if allowed, else 1
+            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+            majority_action = 0 if turnaround_available else 1
+            majority_count = 0
+
+        step_metadata['action_number'] = int(majority_action)
+        step_metadata['ensemble_votes'] = vote_actions
+        step_metadata['ensemble_majority_count'] = majority_count
+
+        # ====== AGGREGATE CONFIDENCE SCORES ======
+        conf_scores_norm = []
+        # Keep only non-empty lists with same length
+        non_empty = [cl for cl in conf_lists if cl]
+        if non_empty:
+            L = len(non_empty[0])
+            if all(len(cl) == L for cl in non_empty):
+                # element-wise mean
+                conf_scores_norm = [
+                    sum(cl[i] for cl in non_empty) / len(non_empty)
+                    for i in range(L)
+                ]
+                conf_scores_norm = VLMNavAgent.normalize_scores(conf_scores_norm)
+            else:
+                # fall back to first non-empty
+                conf_scores_norm = non_empty[0]
+
+        step_metadata['confident_score'] = conf_scores_norm
+        step_metadata['score'] = max(conf_scores_norm) if conf_scores_norm else 0.0
+
+        # ====== existing bookkeeping (parent link, logs, etc.) ======
+        try:
+            # Parent for next step (for path length accounting)
             self._link_parent_for_next_step(self.step_ndx)
 
             if self.step_ndx not in self.tried_actions_by_step:
                 self.tried_actions_by_step[self.step_ndx] = set()
             self.tried_actions_by_step[self.step_ndx].add(step_metadata['action_number'])
 
-
-            conf_scores_raw = response_dict.get('confident_score', [])
-
-
-            # Normalize them
-            conf_scores_norm = VLMNavAgent.normalize_scores(conf_scores_raw)
-
-
-
-            step_metadata['confident_score'] = conf_scores_norm
-
-            step_metadata['score'] = max(conf_scores_norm) if conf_scores_norm else 0.0
-
-
-
-
-
-#################################################### filter part ####################################
-
-
-
-
-
-            # --- Print detailed action info right after normalization ---
-            if a_final is not None and len(a_final) == len(conf_scores_norm):
-                print("\n🎯 Action candidates after normalization:")
-
-                # Shift so last element (turnaround) becomes first
-                shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
-
-                for i, ((r, theta), score) in enumerate(shifted_pairs):
-                    print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
-                        f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {score * self.global_semantic_score:.5f}")
-            else:
-                print("⚠️ a_final or conf_scores_norm length mismatch — cannot print detailed action info.")
-
-
-
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
             step_number = self.step_ndx
             conf_scores = step_metadata['confident_score']
-            a_final = list(a_final)
 
-
+            # For _record_log_entry we want a list of (r, theta)
             self.step_score_history_dict[step_number] = step_metadata['score']
+            self._record_log_entry(step_number, a_final_list, conf_scores, turnaround_available)
 
-            self._record_log_entry(step_number, a_final, conf_scores, turnaround_available)
+            # Optional: debug print of candidates vs aggregated scores
+            if a_final_list and conf_scores_norm and len(conf_scores_norm) >= 1:
+                print("\n🎯 Ensemble action candidates after aggregation:")
 
+                gsv = self.global_semantic_score if self.global_semantic_score is not None else 1.0
 
+                # If turnaround is available AND your confident_score vector is aligned
+                # such that conf[0] is action 0 and conf[1:] are actions 1..N-1,
+                # we pair conf[0] with the last ray in a_final_list (turn-around).
+                if turnaround_available and len(conf_scores_norm) == len(a_final_list):
+                    shifted_pairs = [(a_final_list[-1], conf_scores_norm[0])] + list(
+                        zip(a_final_list[:-1], conf_scores_norm[1:])
+                    )
+                    for i, ((r, theta), score) in enumerate(shifted_pairs):
+                        print(
+                            f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                            f"distance = {r:.5f} m, score = {score:.5f}, "
+                            f"adjusted = {score * gsv:.5f}"
+                        )
+                else:
+                    for i, ((r, theta), score) in enumerate(zip(a_final_list, conf_scores_norm)):
+                        print(
+                            f"  Action {i+1}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                            f"distance = {r:.5f} m, score = {score:.5f}, "
+                            f"adjusted = {score * gsv:.5f}"
+                        )
 
+            norm = VLMNavAgent.normalize_scores(step_metadata['confident_score']) if step_metadata['confident_score'] else []
+            print(f"Ensemble majority action: {step_metadata['action_number']}, normalized aggregated scores: {norm}")
 
-
-
-
-            norm = VLMNavAgent.normalize_scores(step_metadata['confident_score'])  
-            print(f"Highes Score Action: {step_metadata['action_number']}, normalized score for all actions: {norm}")
-
-            
-        except (IndexError, KeyError, TypeError, ValueError) as e:
-            logging.error(f'Error parsing response {e}')
+        except Exception as e:
+            logging.error(f'Error in ensemble prompting logic: {e}')
             step_metadata['success'] = 0
+
         finally:
             logging_data['ACTION_NUMBER'] = step_metadata.get('action_number')
-            
-            # score is the highest score
             logging_data['CONFIDENCE_SCORE'] = step_metadata.get('score')
-            # confident_score is the score for each action
             logging_data['CONFIDENT_SCORE'] = step_metadata.get('confident_score')
             logging_data['PROMPT'] = action_prompt
-            logging_data['RESPONSE'] = response
+            logging_data['RESPONSE'] = raw_responses   # list of responses, one per VLM
+            logging_data['ENSEMBLE_VOTES'] = vote_actions
 
+        return step_metadata, logging_data, raw_responses
 
-
-
-
-
-        return step_metadata, logging_data, response
     
 
     def _record_log_entry(self, step_number, a_final, conf_scores, turnaround_available):
