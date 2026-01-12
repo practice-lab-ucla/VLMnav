@@ -11,7 +11,7 @@ agent_cfg:
 
 
 
-  vlm_score_threshold: 0.0909532
+  # vlm_score_threshold: 0.0909532
 
 
 
@@ -87,7 +87,7 @@ agent_cfg:
       # model: gpt-5-nano
 
       # model: gpt-5.2-chat-latest
-    num_action_vlms: 20
+    num_action_vlms: 10
 
 sim_cfg:
   agent_height: 0.9

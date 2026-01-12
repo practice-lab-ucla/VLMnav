@@ -10,6 +10,7 @@ import csv
 import os
 import json, re
 
+from collections import Counter
 from simWrapper import PolarAction, SimWrapper
 from utils import *
 from vlm import *
@@ -18,6 +19,7 @@ from scipy.spatial.transform import Rotation as R
 from visualize_topdown import visualize_topdown_map_with_agent
 from Modified_BFS import modified_bfs
 from habitat_sim.utils.common import quat_from_coeffs
+
 
 
 
@@ -1029,34 +1031,55 @@ class VLMNavAgent(Agent):
 
         # ====== ENSEMBLE CALLS ======
         vlms = getattr(self, "actionVLMs", [self.actionVLM])
-        raw_responses = []
-        vote_actions = []       # one chosen action per VLM
+        num_vlms = len(vlms)
+
+        # keep responses aligned by index for debugging / logging
+        raw_responses = [None] * num_vlms
+        vote_actions = []       # one chosen action per successfully parsed VLM
         conf_lists = []         # (optional) confident_score per VLM
 
-        for idx, vlm in enumerate(vlms):
+        def _call_single(idx, vlm):
+            """
+            Helper so we know which VLM index produced which response.
+            Runs in a worker thread.
+            """
             resp = vlm.call_chat(self.cfg['context_history'], prompt_images, action_prompt)
-            raw_responses.append(resp)
+            return idx, resp
 
-            try:
-                resp_dict = self._eval_response(resp)
-                # 1) chosen action from this VLM
-                a = int(resp_dict['action'])
-                vote_actions.append(a)
+        # Run all VLM calls in parallel and wait until ALL finish
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_vlms) as executor:
+            futures = [
+                executor.submit(_call_single, idx, vlm)
+                for idx, vlm in enumerate(vlms)
+            ]
 
-                # 2) confidence list (optional, for aggregation)
-                conf_raw = resp_dict.get('confident_score', [])
-                conf_norm = VLMNavAgent.normalize_scores(conf_raw) if conf_raw else []
-                conf_lists.append(conf_norm)
-                print("\n🧠 Ensemble VLM #{:02d}".format(idx))
-                print(f"   raw response: {resp}")
-                print(f"   parsed action: {a}")
-                print(f"   raw confident_score: {conf_raw}")
-                print(f"   normalized confident_score: {conf_norm}")
-            except (KeyError, ValueError, TypeError) as e:
-                logging.error(f'Error parsing ensemble response from VLM {idx}: {e}')
-                conf_lists.append([])
-                print("\n⚠️ Ensemble VLM #{:02d} parsing error: {}".format(idx, e))
-                print("   raw response:", resp)
+            for future in concurrent.futures.as_completed(futures):
+                idx, resp = future.result()
+                raw_responses[idx] = resp
+
+                try:
+                    resp_dict = self._eval_response(resp)
+                    # 1) chosen action from this VLM
+                    a = int(resp_dict['action'])
+                    vote_actions.append(a)
+
+                    # 2) confidence list (optional, for aggregation)
+                    conf_raw = resp_dict.get('confident_score', [])
+                    conf_norm = VLMNavAgent.normalize_scores(conf_raw) if conf_raw else []
+                    conf_lists.append(conf_norm)
+
+                    print("\n🧠 Ensemble VLM #{:02d}".format(idx))
+                    print(f"   raw response: {resp}")
+                    print(f"   parsed action: {a}")
+                    print(f"   raw confident_score: {conf_raw}")
+                    print(f"   normalized confident_score: {conf_norm}")
+                except (KeyError, ValueError, TypeError) as e:
+                    logging.error(f'Error parsing ensemble response from VLM {idx}: {e}')
+
+
+                    conf_lists.append([])
+                    print("\n⚠️ Ensemble VLM #{:02d} parsing error: {}".format(idx, e))
+                    print("   raw response:", resp)
 
         # ====== MAJORITY VOTE OVER ACTIONS ======
         # Keep only clearly valid votes: 0..len(a_final_list)
@@ -1067,16 +1090,30 @@ class VLMNavAgent(Agent):
 
         if valid_votes:
             counts = Counter(valid_votes)
+
+            # --- print how many voted for which action ---
+            print("\n🗳️ Ensemble vote summary:")
+            for idx in range(len(a_final_list)):
+                print(f"   action {idx}: {counts.get(idx, 0)} votes")
+            print(f"   total valid votes: {sum(counts.values())}")
+            # ---------------------------------------------
+
             # Sort by (-frequency, action_index) for deterministic tie-breaking
             majority_action, majority_count = sorted(
                 counts.items(),
                 key=lambda kv: (-kv[1], kv[0])
             )[0]
+            print(f"   -> majority action: {majority_action} with {majority_count} votes")
         else:
             # Fallback if everything failed: choose 0 (turn around) if allowed, else 1
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
             majority_action = 0 if turnaround_available else 1
             majority_count = 0
+
+            print("\n🗳️ Ensemble vote summary:")
+            print("   no valid votes parsed, "
+                  f"using fallback action {majority_action}")
+
 
         step_metadata['action_number'] = int(majority_action)
         step_metadata['ensemble_votes'] = vote_actions
