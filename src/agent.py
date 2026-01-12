@@ -16,7 +16,7 @@ from vlm import *
 from pivot import PIVOT
 from scipy.spatial.transform import Rotation as R
 from visualize_topdown import visualize_topdown_map_with_agent
-from Modified_BFS import modified_bfs
+
 from habitat_sim.utils.common import quat_from_coeffs
 
 
@@ -141,7 +141,7 @@ class VLMNavAgent(Agent):
         self.current_episode_idx = None 
 
 
-        self.agent_grid_history = {}
+
         self.teleport_step_flags = {}
         self.step_action_log = []
 
@@ -174,18 +174,13 @@ class VLMNavAgent(Agent):
         self.overall_stop = False
 
 
-        self.goal_grid_location = None
-
-
-
         ### record the score
 
 
         self.step_action_ranking_dict = {}
         self.defer_rewind_to_root = False 
         
-        self.best_bfs_path = set()
-        self.best_bfs_min = None
+
 
         # which actions we have already tried at each step
         self.tried_actions_by_step = {}          # step_idx -> set of action indices
@@ -283,52 +278,8 @@ class VLMNavAgent(Agent):
 
 
             self.teleport_step_flags[self.step_ndx] = self.defer_rewind_to_root
-            # print(f"step is ##########################################################################################{self.step_ndx}")
 
-            # grid_row_col = visualize_topdown_map_with_agent(
-            #     map_path=map_path,
-            #     agent_state=agent_state,
-            #     map_origin=map_origin,
-            #     step_idx=self.step_ndx,
-            #     meters_per_pixel=self.cfg.get('meters_per_pixel', 0.005),
-            #     save_path=f"logs/topdown_step{self.step_ndx}.png",
-            #     show=False,
-            #     agent_grid_history=self.agent_grid_history,
-            #     teleport_step_flags=self.teleport_step_flags  # this includes the current step
             # )
-
-            grid_row_col = visualize_topdown_map_with_agent(
-                map_path=map_path,
-                agent_state=agent_state,
-                map_origin=map_origin,
-                step_idx=self.step_ndx,
-                meters_per_pixel=self.cfg.get('meters_per_pixel', 0.005),
-                grid_spacing_m=self.cfg.get('grid_spacing_m', 0.7),   
-                save_path=f"logs/topdown_step{self.step_ndx}.png",
-                show=False,
-                agent_grid_history=self.agent_grid_history,
-                teleport_step_flags=self.teleport_step_flags
-            )
-
-
-            print("grid_row_col:", grid_row_col)
-            print("self.step_ndx:", self.step_ndx)
-
-
-            self.defer_rewind_to_root = False  # consume flag
-
-            # self.agent_grid_history.append(grid_row_col)
-            self.agent_grid_history[self.step_ndx] = grid_row_col
-
-
-            # print("📘 Agent Grid History:")
-            # for step, (r, c) in sorted(self.agent_grid_history.items()):
-            #     print(f"  Step {step}: Grid cell (row={r}, col={c})")
-
-
-
-
-
 
 
 
@@ -512,44 +463,8 @@ class VLMNavAgent(Agent):
 
 
         self.teleport_step_flags[self.step_ndx] = self.defer_rewind_to_root
-        # print(f"step is ##########################################################################################{self.step_ndx}")
 
-        # grid_row_col = visualize_topdown_map_with_agent(
-        #     map_path=map_path,
-        #     agent_state=agent_state,
-        #     map_origin=map_origin,
-        #     step_idx=self.step_ndx,
-        #     meters_per_pixel=self.cfg.get('meters_per_pixel', 0.005),
-        #     save_path=f"logs/topdown_step{self.step_ndx}.png",
-        #     show=False,
-        #     agent_grid_history=self.agent_grid_history,
-        #     teleport_step_flags=self.teleport_step_flags  # this includes the current step
-        # )
-
-        grid_row_col = visualize_topdown_map_with_agent(
-            map_path=map_path,
-            agent_state=agent_state,
-            map_origin=map_origin,
-            step_idx=self.step_ndx,
-            meters_per_pixel=self.cfg.get('meters_per_pixel', 0.005),
-            grid_spacing_m=self.cfg.get('grid_spacing_m', 0.7),   # 👈 add this line
-            save_path=f"logs/topdown_step{self.step_ndx}.png",
-            show=False,
-            agent_grid_history=self.agent_grid_history,
-            teleport_step_flags=self.teleport_step_flags
-        )
-
-
-        # self.agent_grid_history.append(grid_row_col)
-        self.agent_grid_history[self.step_ndx] = grid_row_col
         
-
-
-        # print("📘 Agent Grid History:")
-        # for step, (r, c) in sorted(self.agent_grid_history.items()):
-        #     print(f"  Step {step}: Grid cell (row={r}, col={c})")
-
-
 
 
         if self.step_ndx == 0:
@@ -636,13 +551,6 @@ class VLMNavAgent(Agent):
 
         print(f"[Step {self.step_ndx}] Global Semantic Score (GSV)AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa: {gsv:.3f}")
 
-        edges = self.generate_grid_edge_score_list_from_adjusted()
-        curr_grid = self.agent_grid_history.get(self.step_ndx)
-        path_to_curr, min_score_to_curr = modified_bfs(edges, curr_grid)
-
-        print(f"score is {min_score_to_curr} ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
-        self.step_action_log_history_dict[self.step_ndx]["min_score_to_curr"] = min_score_to_curr
-
 
 
 
@@ -657,92 +565,6 @@ class VLMNavAgent(Agent):
         else:
             print(f"model stopped skipping adjusted score.")
 
-            prev_step = self.step_ndx - 1
-            prev_grid = self.agent_grid_history.get(prev_step)
-            curr_grid = self.agent_grid_history.get(self.step_ndx)
-
-            # If current grid is missing because the log didn't run, reconstruct using SAME grid logic
-            if curr_grid is None:
-                try:
-                    agent = self.simWrapper.sim.get_agent(0)
-                    s = agent.get_state()
-
-                    # --- match visualize_topdown_map_with_agent ---
-                    mpp = float(self.cfg.get('meters_per_pixel', 0.005))
-                    grid_spacing_m = float(self.cfg.get('grid_spacing_m', 0.7))
-                    origin_x, origin_y = self.cfg.get('map_origin')
-
-                    x = float(s.position[0])
-                    z = float(s.position[2])
-
-                    x_px = int((x - origin_x) / mpp)
-                    y_px = int((z - origin_y) / mpp)
-                    spacing_px = int(grid_spacing_m / mpp)
-
-                    grid_x = x_px // spacing_px + 1
-                    grid_y = y_px // spacing_px + 1
-
-                    curr_grid = (grid_y, grid_x)
-                    # ---------------------------------------------
-
-                    self.agent_grid_history[self.step_ndx] = curr_grid
-                except Exception as e:
-                    print(f"⚠️ Could not reconstruct current grid from pose: {e}")
-
-            # (rest unchanged) synthesize minimal log if missing, then append (prev->curr) edge using prev_adj
-            if self.step_ndx not in self.step_action_log_history_dict:
-                grid_from = [prev_grid[0], prev_grid[1]] if prev_grid is not None else None
-                grid_current = [curr_grid[0], curr_grid[1]] if curr_grid is not None else None
-                try:
-                    agent = self.simWrapper.sim.get_agent(0)
-                    s = agent.get_state()
-                    log_entry = {
-                        "step": self.step_ndx,
-                        "position": [round(float(p), 2) for p in s.position],
-                        "rotation": [float(s.rotation.w), float(s.rotation.x),
-                                    float(s.rotation.y), float(s.rotation.z)],
-                        "grid_current": grid_current,
-                        "grid_from": grid_from,
-                        "actions": None,
-                    }
-                    self.step_action_log_history_dict[self.step_ndx] = log_entry
-                    self.step_action_log.append(log_entry)
-                except Exception as e:
-                    print(f"⚠️ Could not synthesize minimal log for step {self.step_ndx}: {e}")
-
-            if (
-                prev_step >= 0
-                and prev_grid is not None
-                and curr_grid is not None
-                and not self.teleport_step_flags.get(self.step_ndx, False)
-            ):
-                prev_adj = self.adjusted_score.get(prev_step)
-                if prev_adj is None:
-                    prev_gsv = self.gsv_per_step.get(prev_step)
-                    prev_score = self.step_score_history_dict.get(prev_step)
-                    if prev_gsv is not None and prev_score is not None:
-                        prev_adj = prev_gsv * prev_score
-
-                if prev_adj is not None:
-                    candidate = (prev_grid[0], prev_grid[1], curr_grid[0], curr_grid[1], round(prev_adj, 3))
-                    if candidate not in edges:
-                        edges.append(candidate)
-
-
-###################################################################################################################
-
-
-        print("📊 Grid Transitions with Adjusted Scores:")
-
-        for r1, c1, r2, c2, score in edges:
-            print(f"({r1}, {c1})-({r2}, {c2}): {score}")
-
-
-        # path, min_score = modified_bfs(edges)
-        # print("testttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt")
-        # print("Best Path:", path)
-        # print("Maximized Minimum Score:", min_score)
-
 
         
 
@@ -751,53 +573,8 @@ class VLMNavAgent(Agent):
         selected_action = metadata['step_metadata']['action_number']
 
 
-        if selected_action == 0:
-            self.turnaround_streak += 1
-        else:
-            self.turnaround_streak = 0
 
 
-
-
-
-
-        curr_grid = self.agent_grid_history.get(self.step_ndx)
-
-
-
-
-
-################################################################ for testing only ###############################################################3
-
-        # # If the stopping head fires on THIS step, end the episode immediately (test mode)
-        # if len(self.stopping_calls) >= 1 and self.stopping_calls[-1] == self.step_ndx:
-
-        #     # produce images; add a "TERMINATING EPISODE" overlay via _project_onto_image()
-        #     raw_action_image = obs['color_sensor'].copy()
-        #     chosen_action_image = obs['color_sensor'].copy()
-        #     self._project_onto_image(
-        #         [],  # no arrows
-        #         chosen_action_image,
-        #         obs['agent_state'],
-        #         obs['agent_state'].sensor_states['color_sensor']
-        #     )
-
-        #     # return STOP so env.py will mark done and end the loop
-        #     return PolarAction.stop, {
-        #         'step_metadata': {'action_number': -2, 'success': 1},
-        #         'logging_data': {'note': 'TEST: goal seen → terminate (no backtracking)'},
-        #         'a_final': [],
-        #         'images': {
-        #             'color_sensor': raw_action_image,
-        #             'color_sensor_chosen': chosen_action_image
-        #         }
-        #     }
-
-
-
-
-
-        # If we're already backtracking and standing on a node of the best BFS path,
         # skip re-traversing it—rewind to explore a different branch.
         if self.goal_reached:
             print("goal reached^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
@@ -1101,49 +878,6 @@ class VLMNavAgent(Agent):
 
 
 
-    # def _find_step_by_grid(self, grid_cell, upto_step):
-    #     if grid_cell is None:
-    #         return None
-    #     for s in range(upto_step - 1, -1, -1):
-    #         log_s = self.step_action_log_history_dict.get(s)
-    #         if log_s and log_s.get("grid_current") == grid_cell:
-    #             return s
-    #     return None
-
-
-    # def _at_state(self, target_state, pos_eps: float = 0.02, ang_eps_deg: float = 2.0) -> bool:
-    #     """
-    #     True iff current simulator agent pose matches target_state within tolerances.
-    #     """
-    #     import numpy as np, math
-    #     from habitat_sim.utils.common import quat_to_angle_axis
-
-    #     curr = self.simWrapper.sim.get_agent(0).get_state()
-
-    #     # position check
-    #     if np.linalg.norm(curr.position - target_state.position) > pos_eps:
-    #         return False
-
-    #     # orientation check by comparing minimal angles
-    #     ang_curr, _ = quat_to_angle_axis(curr.rotation)
-    #     ang_tgt, _ = quat_to_angle_axis(target_state.rotation)
-
-    #     print(f"[DEBUG] curr: ang={ang_curr:.4f} ")
-    #     print(f"[DEBUG] tgt : ang={ang_tgt:.4f} ")
-
-
-
-    #     def _norm_angle(a):
-    #         a = abs(a) % (2 * math.pi)
-    #         return a if a <= math.pi else (2 * math.pi - a)
-
-    #     return abs(_norm_angle(ang_curr) - _norm_angle(ang_tgt)) <= math.radians(ang_eps_deg)
-
-
-
-
-
-
 
 
     def swipe_back_all_steps(self):
@@ -1186,20 +920,6 @@ class VLMNavAgent(Agent):
                 candidates.append((idx, float(sc)))
 
 
-#####################################################################################
-                # sc = a.get("adjusted")
-
-                # threshold = float(self.cfg.get('vlm_score_threshold', 0.0))
-                # if sc <= threshold:
-                #     continue
-
-                # bfs_min = log.get("min_score_to_curr")
-                # if bfs_min is None:
-                #     bfs_min = 0.0 
-
-                # new_score = 10.0 * min(sc, bfs_min) + max(sc, bfs_min)
-                # candidates.append((idx, new_score))
-#####################################################################################
 
 
 
@@ -1389,45 +1109,6 @@ class VLMNavAgent(Agent):
 
 
 
-    def generate_grid_edge_score_list_from_adjusted(self):
-        """
-        Generate a list of transitions between grid cells with associated adjusted scores.
-        Uses self.adjusted_score[step - 1] and skips steps without grid_from/grid_current.
-        Returns a list of tuples: (from_row, from_col, to_row, to_col, adjusted_score)
-        """
-        edge_list = []
-
-        sorted_steps = sorted(self.step_action_log_history_dict.keys())
-
-        
-        for step in sorted_steps:
-            if step == 0:
-                continue  # Skip step 0, no previous step
-
-            log = self.step_action_log_history_dict.get(step)
-            if not log:
-                continue
-
-            grid_from = log.get("grid_from")
-            grid_to = log.get("grid_current")
-            score = self.adjusted_score.get(step - 1)  # Score from previous step
-
-            if grid_from is None or grid_to is None or score is None:
-            # if grid_from is None or grid_to is None:
-                continue  # Skip rewinds or missing info
-
-            edge_list.append((grid_from[0], grid_from[1], grid_to[0], grid_to[1], round(score, 3)))
-
-        return edge_list
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1505,7 +1186,6 @@ class VLMNavAgent(Agent):
         self.actionVLM.reset()
 
         # this will be passed to env.py
-        self.agent_grid_history = {}
         self.teleport_step_flags = {}
         self.step_action_log = []
         ## stored in _prompting
@@ -1530,14 +1210,11 @@ class VLMNavAgent(Agent):
         ## the FINAL call stop decision will kill the entire episode ##
         self.overall_stop = False
 
-        self.goal_grid_location = None
-
 
         self.step_action_ranking_dict = {}
         self.defer_rewind_to_root = False 
 
-        self.best_bfs_path = set()
-        self.best_bfs_min = None
+
 
         # which actions we have already tried at each step
         self.tried_actions_by_step = {}          # step_idx -> set of action indices
@@ -2235,27 +1912,7 @@ class VLMNavAgent(Agent):
         pos = state.position
         rot = state.rotation
 
-        if step_number in self.agent_grid_history:
-            curr_grid = self.agent_grid_history[step_number]
-            grid_current = [curr_grid[0], curr_grid[1]]
-        else:
-            curr_grid = None
 
-
-        if step_number > 0 and (step_number - 1) in self.agent_grid_history:
-            prev_grid = self.agent_grid_history[step_number - 1]
-            grid_from = [prev_grid[0], prev_grid[1]]
-        else:
-            grid_from = None
-
-
-
-
-        # parent = self._find_step_by_grid(grid_from, step_number)
-        # if parent is None:
-        #     # fallback: linear parent if present
-        #     parent = step_number - 1 if step_number - 1 in self.step_action_log_history_dict else None
-        # self.parent_by_step[step_number] = parent
 
 
         parent = self._determine_parent_step(step_number)
@@ -2277,8 +1934,6 @@ class VLMNavAgent(Agent):
             "step": int(step_number),
             "position": [float(pos[0]), float(pos[1]), float(pos[2])],
             "rotation": [float(rot.w), float(rot.x), float(rot.y), float(rot.z)],
-            "grid_from": grid_from,
-            "grid_current": grid_current if 'grid_current' in locals() else None,
             "actions": actions,
             "parent": parent,
         }
@@ -2323,8 +1978,7 @@ class VLMNavAgent(Agent):
         print(f"📍 Agent Location: {log_entry['position']}")
         print(f"🧭 Agent Rotation (quat): {log_entry['rotation']}")
 
-        print(f"📦 Grid From: {log_entry['grid_from']}")
-        print(f"📦 Grid Currently at  : {log_entry['grid_current']}")
+
 
         if actions is not None:
             for a in log_entry['actions']:
