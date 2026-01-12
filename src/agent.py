@@ -1991,77 +1991,68 @@ class VLMNavAgent(Agent):
 
 
 
-
     def _online_filter(self, a_final, conf_scores_norm, threshold=None):
         """
-        Simple Set baseline: include the smallest set of actions whose cumulative
-        confidence ≥ (1 - epsilon). This implements the comparison test described
-        in the KNOWNO paper.
-
-        Args:
-            a_final: list of (distance, angle) tuples for candidate actions
-            conf_scores_norm: list of normalized confidence scores (sum to 1)
-            threshold: (unused here) kept for compatibility with caller
+        Online filter that selects high-confidence actions and returns ranking.
+        Now includes the same printed output as before.
         """
+        if threshold is None:
+            threshold = self.cfg.get('vlm_score_threshold', 0.0)
 
-        epsilon = float(self.cfg.get('simple_set_epsilon'))
-        target_cum = max(0.0, min(1.0, 1.0 - epsilon))
+        # Guard conditions
+        if a_final is None or conf_scores_norm is None or len(a_final) != len(conf_scores_norm):
+            print("⚠️ Cannot compute adjusted scores (length mismatch).")
+            return [], [], [], [], [], []
+
         gsv = float(self.global_semantic_score or 0.0)
+        adjusted_scores = [score * gsv for score in conf_scores_norm]
+        high_indices = [i for i, adj in enumerate(adjusted_scores) if adj > threshold]
 
-        # Rebuild shifted pairs to match your logging
-        shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(
-            zip(a_final[:-1], conf_scores_norm[1:])
-        )
-        scores_per_index = [score for (_, score) in shifted_pairs]
+        # Reconstruct shifted pairs (turnaround first)
+        shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
 
-        # Sort by confidence (descending)
-        sorted_by_score = sorted(
-            list(enumerate(scores_per_index)), key=lambda x: -x[1]
-        )
+        if high_indices:
+            print(f"\n✅ Indices with adjusted score > threshold ({threshold:.3f}): {high_indices}")
+            print("🎯 Detailed info for high-confidence actions:")
+            for i in high_indices:
+                (r, theta), score = shifted_pairs[i]
+                adjusted_val = score * gsv
+                print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                    f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {adjusted_val:.5f}")
+        else:
+            print(f"⚠️ No actions exceeded threshold {threshold:.3f}.")
+ 
 
-        high_indices = []
-        cum = 0.0
-        for idx, score in sorted_by_score:
-            cum += score
-            high_indices.append(idx)
-            if cum >= target_cum:
-                break
-
-        # Logging
-        print(f"\n🧪 Simple Set baseline active (ε={epsilon:.3f}) target cumulative = {target_cum:.3f}")
-        print(f"   Selected indices: {high_indices}, cumulative score = {cum:.3f}")
-        print("🎯 Detailed info for Simple Set prediction set:")
+        # Build filtered structure
+        high_conf_actions = []
+        orig_indices_filtered = []
         for i in high_indices:
             (r, theta), score = shifted_pairs[i]
-            adj = score * gsv
-            print(
-                f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
-                f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {adj:.5f}"
-            )
-
-        # Build final outputs (mirroring your existing return format)
-        high_conf_actions, a_final_filtered, conf_scores_filtered = [], [], []
-        for i in high_indices:
-            (r, theta), score = shifted_pairs[i]
-            adj = score * gsv
+            adjusted_val = score * gsv
             high_conf_actions.append({
                 "index": int(i),
                 "distance": round(float(r), 4),
                 "angle": round(float(theta), 5),
                 "score": round(float(score), 5),
-                "adjusted": round(float(adj), 5)
+                "adjusted": round(float(adjusted_val), 5)
             })
-            a_final_filtered.append((float(r), float(theta)))
-            conf_scores_filtered.append(float(score))
+            orig_indices_filtered.append(int(i))
 
-        # Rank actions by confidence
+        a_final_filtered = [(float(h['distance']), float(h['angle'])) for h in high_conf_actions]
+        conf_scores_filtered = [float(h['score']) for h in high_conf_actions]
+
+        # Rank and print results
         action_ranking = sorted(
-            [(high_conf_actions[i]["index"], conf_scores_filtered[i])
-            for i in range(len(conf_scores_filtered))],
+            [(orig_indices_filtered[i], conf_scores_filtered[i]) for i in range(len(conf_scores_filtered))],
             key=lambda x: -x[1]
         )
 
-        return action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, [], high_indices
+
+        return action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, adjusted_scores, high_indices
+
+
+
+
 
 
 

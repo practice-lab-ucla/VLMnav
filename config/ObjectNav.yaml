@@ -11,12 +11,7 @@ agent_cfg:
 
 
 
-  # vlm_score_threshold: 0.0909532
-
-
-
-
-  simple_set_epsilon: 0.75
+  vlm_score_threshold: 0.0909532
 
 
 
