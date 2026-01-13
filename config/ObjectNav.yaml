@@ -93,6 +93,8 @@ agent_cfg:
 
       # model: gpt-5.2-chat-latest
 
+    num_action_vlms: 10
+
 
 sim_cfg:
   agent_height: 0.9
