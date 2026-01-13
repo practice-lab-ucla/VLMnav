@@ -1717,7 +1717,43 @@ class VLMNavAgent(Agent):
         logging_data = {}
         try:
             response_dict = self._eval_response(response)
-            step_metadata['action_number'] = int(response_dict['action'])
+            action_from_vlm = int(response_dict['action'])
+            step_metadata['action_number'] = action_from_vlm
+
+            print(f"🎯 VLM chosen action (single best): {action_from_vlm}")
+
+
+
+
+
+            # --- Read prediction_set from the VLM (Prompt Set) ---
+            raw_set = response_dict.get("prediction_set", [])
+            prediction_set = []
+            num_actions = len(a_final) if a_final is not None else 0
+
+            for idx in raw_set:
+                try:
+                    i = int(idx)
+                except Exception:
+                    continue
+                if 0 <= i < num_actions:
+                    prediction_set.append(i)
+
+            # if the model didn't give anything valid, fall back to the chosen action
+            if not prediction_set and num_actions > 0:
+                prediction_set = [step_metadata['action_number']]
+
+            prediction_set = sorted(set(prediction_set))
+            step_metadata["prediction_set"] = prediction_set
+            print(f"📦 Prompt-Set prediction_set from VLM: {prediction_set}")
+
+
+
+
+
+
+
+
 
             self._link_parent_for_next_step(self.step_ndx)
 
@@ -1737,18 +1773,17 @@ class VLMNavAgent(Agent):
             # the direct output of the score can be unnormalized, here we normalize the score
 
             # Get raw confidence scores from response
-            conf_scores_raw = response_dict.get('confident_score', [])
+            # Prompt-Set: we no longer use scores from the VLM.
+            # Instead, we create dummy scores (all zeros) for logging.
+            num_actions = len(a_final) if a_final is not None else 0
+            conf_scores_norm = [
+                1.0 if i in prediction_set else 0.0
+                for i in range(num_actions)
+            ]
 
-            print(f"🔎 Raw confident scores (from VLM) RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRr: {conf_scores_raw}")
-
-            # Normalize them
-            conf_scores_norm = VLMNavAgent.normalize_scores(conf_scores_raw)
-
-            print(f"✅ Normalized confident scores NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN: {conf_scores_norm}")
-
-            step_metadata['confident_score'] = conf_scores_norm
-
-            step_metadata['score'] = max(conf_scores_norm) if conf_scores_norm else 0.0
+            step_metadata["confident_score"] = conf_scores_norm
+            # "score" = 1 if we have a non-empty set, else 0
+            step_metadata["score"] = 1.0 if prediction_set else 0.0
 
 
 
@@ -1774,43 +1809,26 @@ class VLMNavAgent(Agent):
             # --- Print detailed action info right after normalization ---
             if a_final is not None and len(a_final) == len(conf_scores_norm):
                 print("\n🎯 Action candidates after normalization:")
-
-                # Shift so last element (turnaround) becomes first
                 shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
-
                 for i, ((r, theta), score) in enumerate(shifted_pairs):
-                    print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
-                        f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {score * self.global_semantic_score:.5f}")
+                    print(
+                        f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                        f"distance = {r:.5f} m, score = {score:.5f}, "
+                        f"adjusted = {score * self.global_semantic_score:.5f}"
+                    )
             else:
                 print("⚠️ a_final or conf_scores_norm length mismatch — cannot print detailed action info.")
 
+            # 🔁 Prompt Set: no online filter, no real scores.
+            # Just keep a dummy ranking so rewind/backtracking still works.
+            num_actions = len(a_final) if a_final is not None else 0
 
 
 
 
 
 
-            action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, adjusted_scores, high_indices = self._online_filter(a_final, conf_scores_norm)
-            # Save ranking for later modules (rewind, logging, etc.)
-            self.step_action_ranking_dict[self.step_ndx] = action_ranking
 
-            print(f"\n🏅 action_ranking = {action_ranking}")
-            if not action_ranking:  # means empty list → no valid action survived threshold
-                print("⚠️ No valid actions found — forcing turnaround (action 0)")
-                step_metadata['action_number'] = 0
-
-
-
-
-
-
-            # # Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)
-            # action_ranking = sorted(
-            #     [(i, score) for i, score in enumerate(conf_scores_norm)],
-            #     key=lambda x: -x[1]
-            # )
-            # self.step_action_ranking_dict[self.step_ndx] = action_ranking
-            # print(f"\n🏅 action_ranking = {action_ranking}")
 
 
 
@@ -1988,70 +2006,6 @@ class VLMNavAgent(Agent):
 
         # for a in log_entry['actions']:
         #     print(f"  Action {a['index']}: angle = {a['angle']}, distance = {a['distance']}m, score = {a['score']}, adjusted = {a['adjusted']}")
-
-
-
-    def _online_filter(self, a_final, conf_scores_norm, threshold=None):
-        """
-        Online filter that selects high-confidence actions and returns ranking.
-        Now includes the same printed output as before.
-        """
-        if threshold is None:
-            threshold = self.cfg.get('vlm_score_threshold', 0.0)
-
-        # Guard conditions
-        if a_final is None or conf_scores_norm is None or len(a_final) != len(conf_scores_norm):
-            print("⚠️ Cannot compute adjusted scores (length mismatch).")
-            return [], [], [], [], [], []
-
-        gsv = float(self.global_semantic_score or 0.0)
-        adjusted_scores = [score * gsv for score in conf_scores_norm]
-        high_indices = [i for i, adj in enumerate(adjusted_scores) if adj > threshold]
-
-        # Reconstruct shifted pairs (turnaround first)
-        shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
-
-        if high_indices:
-            print(f"\n✅ Indices with adjusted score > threshold ({threshold:.3f}): {high_indices}")
-            print("🎯 Detailed info for high-confidence actions:")
-            for i in high_indices:
-                (r, theta), score = shifted_pairs[i]
-                adjusted_val = score * gsv
-                print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
-                    f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {adjusted_val:.5f}")
-        else:
-            print(f"⚠️ No actions exceeded threshold {threshold:.3f}.")
- 
-
-        # Build filtered structure
-        high_conf_actions = []
-        orig_indices_filtered = []
-        for i in high_indices:
-            (r, theta), score = shifted_pairs[i]
-            adjusted_val = score * gsv
-            high_conf_actions.append({
-                "index": int(i),
-                "distance": round(float(r), 4),
-                "angle": round(float(theta), 5),
-                "score": round(float(score), 5),
-                "adjusted": round(float(adjusted_val), 5)
-            })
-            orig_indices_filtered.append(int(i))
-
-        a_final_filtered = [(float(h['distance']), float(h['angle'])) for h in high_conf_actions]
-        conf_scores_filtered = [float(h['score']) for h in high_conf_actions]
-
-        # Rank and print results
-        action_ranking = sorted(
-            [(orig_indices_filtered[i], conf_scores_filtered[i]) for i in range(len(conf_scores_filtered))],
-            key=lambda x: -x[1]
-        )
-
-
-        return action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, adjusted_scores, high_indices
-
-
-
 
 
 
@@ -2941,6 +2895,7 @@ class ObjectNavAgent(VLMNavAgent):
             
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
+
             # action_prompt = (
             #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
             #     f"Use your prior knowledge about where items are typically located within a home. "
@@ -2951,11 +2906,13 @@ class ObjectNavAgent(VLMNavAgent):
             #     f"Second, tell me which general direction you should go in. "
             #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
             #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-            #     f"'action' must be an integer not a string. "
+            #     f"The 'confident_score' list represents probabilities for each action "
+            #     f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
+            #     f"Do NOT normalize or force the scores to sum to 1. "
             #     f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-            #     f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
             #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
             # )
+
 
             action_prompt = (
                 f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
@@ -2963,15 +2920,14 @@ class ObjectNavAgent(VLMNavAgent):
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
-                f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
-                f"Second, tell me which general direction you should go in. "
-                f"Lastly, explain which action achieves that best and return it as JSON in the format: "
-                f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-                f"The 'confident_score' list represents probabilities for each action "
-                f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
-                f"Do NOT normalize or force the scores to sum to 1. "
-                f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-                f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
+                f"First, briefly describe what you see in your sensor observation and how it relates to the goal. "
+                f"Second, decide which actions are reasonable candidates to move toward the goal. "
+                f"Return ONLY a JSON dictionary in the format: "
+                f"{{'action': <best_action_index>, 'prediction_set': [<i0>, <i1>, ...]}}. "
+                f"'action' must be a single integer index of the best action. "
+                f"'prediction_set' must be a list of integer action indices (including 0 if you choose to turn around) "
+                f"for the actions that you think are reasonable options. "
+                f"Do NOT output keys like 'confident_score' or 'score', and do NOT write anything before or after the JSON."
             )
 
 
@@ -2987,39 +2943,6 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-            # action_prompt = (
-            #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
-            #     f"Use your prior knowledge about where items are typically located within a home. "
-            #     f"There are {num_actions} actions that you can choose from. "
-            #     f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-            #     f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
-            #     f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
-            #     f"Second, tell me which general direction you should go in. "
-            #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
-            #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-            #     f"'action' must be an integer not a string. "
-            #     f"Generate exactly {num_actions} scores, one for each action shown. "
-            #     f"Each s_i is an independent confidence value in [0, 1] for action i. "
-            #     f"Higher scores mean the action is more likely to bring you closer to the {goal.upper()} or otherwise more promising. "
-            #     f"Lower scores mean the action is less likely to help reach the goal, blocked, or less useful. "
-            #     f"Do NOT normalize or force the scores to sum to 1. "
-            #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            #     f"If two actions are visually/geometrically similar (e.g., small angle difference or targeting the same opening/corridor), "
-            #     f"their scores should be close (e.g., difference ≤ 0.10)."
-            # )
 
             
             return action_prompt
