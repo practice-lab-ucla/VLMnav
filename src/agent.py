@@ -2279,14 +2279,17 @@ class VLMNavAgent(Agent):
                     f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}°)"
                 )
 
+
+
+
+
+
+
+
             # ---------- PASS 2: projection & numbering ----------
             # Numbering order: LEFT -> CENTER -> RIGHT
             action_index_offset = 0
-
-
-
-
-
+            projected_actions_by_view = {}  # view_name -> { (r, theta) -> action_index }
 
             for view_name in ["left", "center", "right"]:
                 idx = name_to_idx[view_name]
@@ -2312,6 +2315,8 @@ class VLMNavAgent(Agent):
                 # bump offset so the next view's numbers keep increasing
                 action_index_offset += len(projected_actions)
 
+                # remember which actions actually got projected in this view
+                projected_actions_by_view[view_name] = projected_actions
 
             # ---------- Stitch [left | center | right] into a projected triplet ----------
             left_img = images["color_sensor_left_projected"]
@@ -2326,6 +2331,26 @@ class VLMNavAgent(Agent):
 
             triplet_projected = np.concatenate([left_img, center_img, right_img], axis=1)
             images["color_sensor_triplet_projected"] = triplet_projected
+
+            # ---------- Filter unified a_final to ONLY actions that were projected ----------
+            # We keep an action iff it was successfully projected in at least one view.
+
+
+            filtered_a_final_center = []
+            for view_name in ["left", "center", "right"]:
+                idx = name_to_idx[view_name]
+                delta_deg = yaw_offsets[idx]
+                delta_rad = np.deg2rad(delta_deg)
+
+                projected_actions = projected_actions_by_view.get(view_name, {})
+                for (r_view, theta_view) in projected_actions.keys():
+                    # convert from this view's local frame back into the center frame
+                    theta_center = theta_view - delta_rad
+                    filtered_a_final_center.append((r_view, theta_center))
+
+            # Only overwrite if something was actually projected; otherwise fall back
+            if filtered_a_final_center:
+                a_final = filtered_a_final_center
 
 
 
@@ -2423,7 +2448,17 @@ class VLMNavAgent(Agent):
             if restrict_to_nonoverlap and abs(delta_rad) > 1e-3:
                 # Convert this view's local theta into the center-camera frame.
                 theta_center = theta_i - delta_rad
+
+
+
                 if -center_half_fov_rad <= theta_center <= center_half_fov_rad:
+                # if -sensor_range/2 <= theta_center <= sensor_range/2:
+
+
+
+
+
+
                     # This ray overlaps the center FOV → skip it.
                     continue
 
@@ -3541,6 +3576,12 @@ class ObjectNavAgent(VLMNavAgent):
         if turnaround_available and turn_around_action not in a_final:
             
             a_final.append(turn_around_action)
+
+
+
+
+
+
 
 
 ############################################################################################# NAV agent####################################################3
