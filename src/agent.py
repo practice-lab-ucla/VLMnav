@@ -271,6 +271,9 @@ class VLMNavAgent(Agent):
 
 
 
+
+
+            
             agent_state = self.simWrapper.sim.get_agent(0).get_state()
             # print("✅ Confirmed agent state after restore:")
             # print(f"  Pos: {agent_state.position}")
@@ -281,7 +284,10 @@ class VLMNavAgent(Agent):
 
             self.teleport_step_flags[self.step_ndx] = self.defer_rewind_to_root
 
-            # )
+
+            self.defer_rewind_to_root = False
+
+            
 
 
 
