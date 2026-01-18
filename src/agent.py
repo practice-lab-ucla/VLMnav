@@ -902,6 +902,8 @@ class VLMNavAgent(Agent):
             candidates = []
             max_idx = 0
             allow_zero_here = (back_step == 0)
+
+            prediction_set = log.get("prediction_set", [])
             for a in actions:
                 idx = int(a.get("index", 0))
                 max_idx = max(max_idx, idx)
@@ -911,6 +913,8 @@ class VLMNavAgent(Agent):
                 if idx == 0 and not allow_zero_here:
                     continue
                 if idx in tried:
+                    continue
+                if idx not in prediction_set:
                     continue
 
 #####################################################################################               
@@ -1044,13 +1048,19 @@ class VLMNavAgent(Agent):
 
         # 2) Rebuild the rewind root state and action queue for that parent step
         def build_queue_from_root(root_step: int):
-            ranking = self.step_action_ranking_dict.get(root_step)
             prev_log = self.step_action_log_history_dict.get(root_step)
-            if ranking is None or prev_log is None:
+            if prev_log is None:
                 return None, None, None
 
+            actions = prev_log.get("actions") or []
+            prediction_set = prev_log.get("prediction_set", [])
+
             tried = self.tried_actions_by_step.get(root_step, set())
-            remaining = [i for i, _ in ranking if i not in tried]
+            # 🔹 remaining siblings = prediction_set ∩ not-tried
+            remaining = [idx for idx in prediction_set if idx not in tried]
+
+            if not remaining:
+                return None, None, None
 
             from habitat_sim import AgentState
             import numpy as np
@@ -1731,19 +1741,28 @@ class VLMNavAgent(Agent):
             prediction_set = []
             num_actions = len(a_final) if a_final is not None else 0
 
+            # ensure the best action is first
+            best = step_metadata['action_number']
+            if 0 <= best < num_actions:
+                prediction_set.append(best)
+                seen = {best}
+            else:
+                seen = set()
+
+            # then append the rest from the VLM in the order it gave
             for idx in raw_set:
                 try:
                     i = int(idx)
                 except Exception:
                     continue
-                if 0 <= i < num_actions:
+                if 0 <= i < num_actions and i not in seen:
                     prediction_set.append(i)
+                    seen.add(i)
 
-            # if the model didn't give anything valid, fall back to the chosen action
+            # fallback if model gave nothing useful
             if not prediction_set and num_actions > 0:
-                prediction_set = [step_metadata['action_number']]
+                prediction_set = [best]
 
-            prediction_set = sorted(set(prediction_set))
             step_metadata["prediction_set"] = prediction_set
             print(f"📦 Prompt-Set prediction_set from VLM: {prediction_set}")
 
@@ -1919,6 +1938,12 @@ class VLMNavAgent(Agent):
 
 
 
+        if actions is not None:
+            prediction_set = [a["index"] for a in actions if a.get("score", 0.0) > 0.0]
+        else:
+            prediction_set = []
+
+
 
 
 
@@ -1954,6 +1979,7 @@ class VLMNavAgent(Agent):
             "rotation": [float(rot.w), float(rot.x), float(rot.y), float(rot.z)],
             "actions": actions,
             "parent": parent,
+            "prediction_set": prediction_set,
         }
 
 
@@ -2921,22 +2947,17 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, briefly describe what you see in your sensor observation and how it relates to the goal. "
-                f"Second, decide which actions are reasonable candidates to move toward the goal. "
+                f"Second, decide which actions are reasonable candidates to move toward the goal. Only choose promising actions"
                 f"Return ONLY a JSON dictionary in the format: "
                 f"{{'action': <best_action_index>, 'prediction_set': [<i0>, <i1>, ...]}}. "
-                f"'action' must be a single integer index of the best action. "
+                f"'action' must be a single integer index of the BEST action - the one action you would choose to execute right now. "
+                f"It must also appear inside 'prediction_set'. "
                 f"'prediction_set' must be a list of integer action indices (including 0 if you choose to turn around) "
-                f"for the actions that you think are reasonable options. "
-                f"Do NOT output keys like 'confident_score' or 'score', and do NOT write anything before or after the JSON."
+                f"for ALL actions that you consider GOOD and WORTH NAVIGATING - i.e., actions that you would seriously consider taking. "
+                f"The list must be RANKED from highest to lowest quality: the first index in 'prediction_set' is the best action, "
+                f"the next index is the second-best, and so on (all still reasonable options). "
+
             )
-
-
-
-
-
-
-
-
 
 
 

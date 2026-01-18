@@ -25,7 +25,11 @@ OUT_FIELDS = [
     "distance_to_g",
     "dis_true",
     "real_true",
+    "dataset_geodesic",
+    "geo_start_to_goal",
+    "path_length_m",
 ]
+
 
 
 def detect_logs_dir() -> Optional[Path]:
