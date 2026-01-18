@@ -279,6 +279,10 @@ class VLMNavAgent(Agent):
 
             self.teleport_step_flags[self.step_ndx] = self.defer_rewind_to_root
 
+
+
+            self.defer_rewind_to_root = False  # consume flag
+
             # )
 
 

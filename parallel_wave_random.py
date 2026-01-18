@@ -9,8 +9,8 @@ import math
 import random
 
 # ========================== CONFIG ==========================
-WAVE_SIZE = 10
-NUM_WAVES = 10
+WAVE_SIZE = 15
+NUM_WAVES = 20
 MAX_STEPS = 200
 
 # Avoid some range
@@ -178,6 +178,9 @@ if __name__ == "__main__":
                             "distance_to_g": r.get("distance_to_g", ""),
                             "dis_true": r.get("dis_true", ""),
                             "real_true": r.get("real_true", ""),
+                            "dataset_geodesic": r.get("dataset_geodesic", ""),
+                            "geo_start_to_goal": r.get("geo_start_to_goal", ""),
+                            "path_length_m": r.get("path_length_m", ""),
                         })
 
             fieldnames = [
@@ -189,6 +192,9 @@ if __name__ == "__main__":
                 "distance_to_g",
                 "dis_true",
                 "real_true",
+                "dataset_geodesic",
+                "geo_start_to_goal",
+                "path_length_m",
             ]
 
             with combined_out.open("w", newline="", encoding="utf-8") as fp:
