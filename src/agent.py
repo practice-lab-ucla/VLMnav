@@ -550,19 +550,7 @@ class VLMNavAgent(Agent):
 
 
         self.teleport_step_flags[self.step_ndx] = self.defer_rewind_to_root
-        # print(f"step is ##########################################################################################{self.step_ndx}")
 
-        # grid_row_col = visualize_topdown_map_with_agent(
-        #     map_path=map_path,
-        #     agent_state=agent_state,
-        #     map_origin=map_origin,
-        #     step_idx=self.step_ndx,
-        #     meters_per_pixel=self.cfg.get('meters_per_pixel', 0.005),
-        #     save_path=f"logs/topdown_step{self.step_ndx}.png",
-        #     show=False,
-        #     agent_grid_history=self.agent_grid_history,
-        #     teleport_step_flags=self.teleport_step_flags  # this includes the current step
-        # )
 
         grid_row_col = visualize_topdown_map_with_agent(
             map_path=map_path,
@@ -583,13 +571,6 @@ class VLMNavAgent(Agent):
         
 
 
-        # print("📘 Agent Grid History:")
-        # for step, (r, c) in sorted(self.agent_grid_history.items()):
-        #     print(f"  Step {step}: Grid cell (row={r}, col={c})")
-
-
-
-
         if self.step_ndx == 0:
             self.init_pos = agent_state.position
 
@@ -599,35 +580,6 @@ class VLMNavAgent(Agent):
 
 
         agent_action, metadata = self._choose_action(obs)
-
-
-
-
-
-
-        # if getattr(self, "terminate_after_local", False):
-        #     # Clear rewind state
-        #     self.tree_action_queue = []
-        #     self.defer_rewind_to_root = False
-        #     self.tree_root_state = None
-        #     self.tree_root_step_ndx = None
-
-        #     # Return STOP and mark failure
-        #     return PolarAction.stop, {
-        #         "step_metadata": {"action_number": -1, "success": 1},
-        #         "logging_data": {"note": "LOCAL_REWIND_EXHAUSTED"},
-        #         "a_final": [],
-        #         "images": {"color_sensor": obs["color_sensor"]}
-        #     }
-        
-
-
-
-        # only before goal / before back-propagation
-
-
-
-
 
 
 
