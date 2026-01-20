@@ -2956,7 +2956,7 @@ class VLMNavAgent(Agent):
             cv2.circle(rgb_image, circle_center, circle_radius, RED, math.ceil(2 * scale_factor))
             text_position = (circle_center[0] - text_width // 2, circle_center[1] + text_height // 2)
             cv2.putText(rgb_image, text, text_position, font, text_size, text_color, text_thickness)
-            cv2.putText(rgb_image, 'TURN AROUND', (text_position[0] // 2, text_position[1] + math.ceil(80 * scale_factor)), font, text_size * 0.75, RED, text_thickness)
+            cv2.putText(rgb_image, 'REWIND', (text_position[0] // 2, text_position[1] + math.ceil(80 * scale_factor)), font, text_size * 0.75, RED, text_thickness)
 
         return projected
 
@@ -3620,28 +3620,15 @@ class ObjectNavAgent(VLMNavAgent):
             
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
-            # action_prompt = (
-            #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
-            #     f"Use your prior knowledge about where items are typically located within a home. "
-            #     f"There are {num_actions} actions that you can choose from. "
-            #     f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-            #     f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
-            #     f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
-            #     f"Second, tell me which general direction you should go in. "
-            #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
-            #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-            #     f"'action' must be an integer not a string. "
-            #     f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-            #     f"The 'confident_score' list represents probabilities for each action and MUST sum exactly to 1.0. "
-            #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            # )
-
             action_prompt = (
                 f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
+                f"The image is a fusion of three views from one position: "
+                f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
+                f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
+                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to REWIND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "
                 f"Lastly, explain which action achieves that best and return it as JSON in the format: "
@@ -3650,13 +3637,9 @@ class ObjectNavAgent(VLMNavAgent):
                 f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
                 f"Do NOT normalize or force the scores to sum to 1. "
                 f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-                f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            )
+                f"{'If Action 0 (REWIND) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
 
-
-
-
-
+            )   
 
 
 
