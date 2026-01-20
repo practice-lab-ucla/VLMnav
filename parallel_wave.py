@@ -10,7 +10,7 @@ import math
 # ========================== CONFIG ==========================
 WAVE_SIZE = 10
 NUM_WAVES = 30
-MAX_STEPS = 200
+MAX_STEPS = 50
 
 # WAVE_SIZE = 1
 # NUM_WAVES = 1

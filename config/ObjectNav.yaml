@@ -70,7 +70,7 @@ agent_cfg:
   Depth_aware: True
 
 
-  multi_view_offset_deg: 30.75
+  multi_view_offset_deg: 45
   # multi_view_offset_deg: 31
 
 
@@ -86,9 +86,9 @@ agent_cfg:
       # model: gemini-1.5-flash-001
 
 
-      model: gpt-4o-mini 
+      # model: gpt-4o-mini 
 
-      # model: gpt-5-nano
+      model: gpt-5-nano
       # model: gpt-5.2-chat-latest
 
       
