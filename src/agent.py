@@ -2552,6 +2552,20 @@ class VLMNavAgent(Agent):
 
 
 
+        # If there are no candidate rays, or every candidate ray is already
+        # classified as explored, then this view cannot propose any new
+        # actions. We signal this to the caller by returning an empty list;
+        # higher-level logic will fall back to action 0 (turn around).
+        has_unexplored = any(is_unexplored for _, _, is_unexplored in arrowData)
+        if not arrowData or not has_unexplored:
+            return []
+
+
+
+
+
+
+
         if filtered == []:
             return []
         if explore:
@@ -2721,6 +2735,59 @@ class VLMNavAgent(Agent):
 
 
         return a_final_projected
+    
+
+
+
+
+    def _fake_vlm_turnaround(self, goal, a_final: list, images: dict, step_metadata: dict, turnaround_available: bool):
+        """Fallback "fake VLM" used when no actions can be proposed.
+
+        This is triggered when the preprocessing / multi-view triplet produces
+        an empty candidate set of actions. In that case there is nothing for
+        the real VLM to rank, so we deterministically select action 0
+        ("turn around"), which is always available in the environment.
+        """
+
+        # We skip constructing a language prompt and skip the model call.
+        # Instead we directly set the metadata as if the model had answered
+        # with action 0 and a single confident action.
+        step_metadata['action_number'] = 0
+        step_metadata.setdefault('success', 1)
+        step_metadata['score'] = 1.0              # max normalized score
+        step_metadata['confident_score'] = [1.0]  # single action with prob 1
+
+        # Record a minimal log entry so that tree/backtracking code still
+        # has a consistent per-step record, even though no real VLM scores exist.
+        step_number = self.step_ndx
+        conf_scores = None   # keep this None if you don't care about per-action log entries
+        self._record_log_entry(step_number, a_final, conf_scores, turnaround_available)
+
+        logging_data = {
+            'ACTION_NUMBER': step_metadata['action_number'],
+            'CONFIDENCE_SCORE': step_metadata['score'],
+            'CONFIDENT_SCORE': step_metadata['confident_score'],
+            'PROMPT': '(fake VLM: no actions available; chose action 0 / turn around)',
+            'RESPONSE': '{"action": 0, "score": 1.0, "confident_score": [1.0]}',
+        }
+
+        return step_metadata, logging_data, logging_data['RESPONSE']
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         
 
     def _prompting(self, goal, a_final: list, images: dict, step_metadata: dict):
@@ -3570,6 +3637,14 @@ class ObjectNavAgent(VLMNavAgent):
         if isinstance(a_final, dict):
             a_final = list(a_final.keys())
 
+
+
+
+        # Remember whether preprocessing produced any candidate actions.
+        no_candidate_actions = len(a_final) == 0
+
+
+
         # check if turn around is added into an option
         turnaround_available = (self.step_ndx - self.turned) >= self.cfg['turn_around_cooldown']
         turn_around_action = (0.75, np.pi)
@@ -3677,10 +3752,15 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-
-
         else:
-            if self.pivot is not None:
+            if no_candidate_actions:
+                # No actions were proposed from the multi-view triplet; skip the real VLM
+                # and use the fake VLM that always chooses action 0 (turn around).
+                step_metadata, logging_data, _ = self._fake_vlm_turnaround(
+                    goal, a_final, images, step_metadata, turnaround_available
+                )
+                agent_action = self._action_number_to_polar(step_metadata['action_number'], list(a_final))
+            elif self.pivot is not None:
                 pivot_instruction = self._construct_prompt(goal, 'pivot')
                 agent_action, pivot_images = self.pivot.run(
                     obs['color_sensor'], pivot_instruction,
@@ -3692,6 +3772,7 @@ class ObjectNavAgent(VLMNavAgent):
             else:
                 step_metadata, logging_data, _ = self._prompting(goal, a_final, images, step_metadata)
                 agent_action = self._action_number_to_polar(step_metadata['action_number'], list(a_final))
+
 
         logging_data['STOPPING RESPONSE'] = stopping_response
         metadata = {
@@ -3761,52 +3842,12 @@ class ObjectNavAgent(VLMNavAgent):
         if prompt_type == 'stopping':
 
 
-            # stopping_prompt = (
-            #                 f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
-            #                 f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
-            #                 f"First, describe what you see in the image and whether a {goal} is present. "
-            #                 f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
-            #                 f"Third, based on what is visible in the image, provide a score between 0.0 and 1.0 representing how much this scene is worth exploring further. "
-            #                 f"This is called the global semantic score. A score close to 1.0 means the scene appears promising and informative, suggesting that moving forward or scanning the area may help locate the {goal}. "
-            #                 f"A score close to 0.0 means the scene appears uninformative, irrelevant, or unlikely to contain useful paths or cues. "
-            #                 f"Format your response in JSON format:\n"
-            #                 f"{{'done': <1 or 0>, 'global_semantic_score': <float between 0.0 and 1.0>}}"
-            #             )
-            
 
 
             # stopping_prompt = (
             #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-            #                     f"Your job is to decide if the agent is NOT FAR from a {goal}, based ONLY on what is VISIBLE in the image."
-            #                     f"Important: a chair is NOT a sofa, and a sofa is NOT a bed. Do NOT infer the {goal} from the room type or context.\n"
-
-            #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
-
-            #                     f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
-            #                     f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
-            #                     f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
-
-            #                     f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
-            #                     f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
-            #                     f"High scores mean the scene has open, traversable, informative paths."
-            #                     f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
-
-            #                     f"Important rules for global_semantic_score:"
-            #                     f"- Do NOT increase the score just because the {goal} is visible."
-            #                     f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
-
-            #                     f"Examples:"
-            #                     f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-            #                     f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
-            #                     f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
-            #                     f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-            #                     f"After Step 3, immediately output this JSON line:"
-            #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
-            # )
-
-            # stopping_prompt = (
-            #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-            #                     f"Your job is to decide if the agent is NOT FAR from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
+            #                     f"The image is a fusion of three views from one position at different angles."
+            #                     f"Your job is to decide if the agent is VERY CLOSE (less than 2 meters) from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
             #                     f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
             #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
@@ -3831,36 +3872,39 @@ class ObjectNavAgent(VLMNavAgent):
             #                     f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
             #                     f"After Step 3, immediately output this JSON line:"
             #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
+
             # )
 
             stopping_prompt = (
-                                f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-                                f"The image is a fusion of three views from one position at different angles."
-                                f"Your job is to decide if the agent is VERY CLOSE (less than 2 meters) from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
-                                f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
+                    f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
+                    f"The image is a fusion of three views from one position: "
+                    f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
+                    f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
+                    f"Your job is to decide if the agent is VERY CLOSE from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
+                    f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
-                                f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
+                    f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
 
-                                f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
-                                f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
-                                f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
+                    f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
+                    f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
+                    f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
 
-                                f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
-                                f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
-                                f"High scores mean the scene has open, traversable, informative paths."
-                                f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
+                    f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
+                    f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
+                    f"High scores mean the scene has open, traversable, informative paths."
+                    f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
 
-                                f"Important rules for global_semantic_score:"
-                                f"- Do NOT increase the score just because the {goal} is visible."
-                                f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
+                    f"Important rules for global_semantic_score:"
+                    f"- Do NOT increase the score just because the {goal} is visible."
+                    f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
 
-                                f"Examples:"
-                                f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-                                f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
-                                f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
-                                f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-                                f"After Step 3, immediately output this JSON line:"
-                                f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
+                    f"Examples:"
+                    f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+                    f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+                    f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
+                    f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+                    f"After Step 3, immediately output this JSON line:"
+                    f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
 
             )
 
@@ -3887,26 +3931,6 @@ class ObjectNavAgent(VLMNavAgent):
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
 
-            # action_prompt = (
-            #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
-            #     f"Use your prior knowledge about where items are typically located within a home. "
-            #     f"There are {num_actions} actions that you can choose from. "
-            #     f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-            #     f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
-            #     f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
-            #     f"Second, tell me which general direction you should go in. "
-            #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
-            #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-            #     f"The 'confident_score' list represents probabilities for each action "
-            #     f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
-            #     f"Do NOT normalize or force the scores to sum to 1. "
-            #     f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-            #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            #     f"{'in the end print the size of the image, also tell me if the image look like 3 images fused horizontally. You should not be able to see the action number on the image with red arrow, tell me if you see it'}"
-
-            # )   
-
-
 
 
             action_prompt = (
@@ -3914,7 +3938,9 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-                f"The image is a fusion of three views from one position at different angles."
+                f"The image is a fusion of three views from one position: "
+                f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
+                f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "
