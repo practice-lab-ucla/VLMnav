@@ -301,10 +301,10 @@ def create_gif(image_dir, interval=600):
             frame = [ax.imshow(img_rgb, animated=True)]
             frames.append(frame)
 
-            img_copy = cv2.imread(f"{image_dir}/step{i}/color_sensor_chosen.png")
-            img_copy_rgb = cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB)
-            frame_copy = [ax.imshow(img_copy_rgb, animated=True)]
-            frames.append(frame_copy)
+            # img_copy = cv2.imread(f"{image_dir}/step{i}/color_sensor_chosen.png")
+            # img_copy_rgb = cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB)
+            # frame_copy = [ax.imshow(img_copy_rgb, animated=True)]
+            # frames.append(frame_copy)
 
         except Exception as e:
             continue
