@@ -9,8 +9,8 @@ import math
 import random
 
 # ========================== CONFIG ==========================
-WAVE_SIZE = 17
-NUM_WAVES = 6
+WAVE_SIZE = 15
+NUM_WAVES = 20
 MAX_STEPS = 200
 
 
