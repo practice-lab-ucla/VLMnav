@@ -21,10 +21,13 @@ OUT_FIELDS = [
     "episode_ndx",
     "scene_id",
     "run_result",
+    "steps_taken",
     "distance_to_g",
     "dis_true",
     "real_true",
-    "bfs_min"
+    "dataset_geodesic",
+    "geo_start_to_goal",
+    "path_length_m",
 ]
 
 

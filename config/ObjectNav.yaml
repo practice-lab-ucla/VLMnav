@@ -10,7 +10,7 @@ agent_cfg:
   explore_bias: 4 
 
 
-  vlm_score_threshold: 0.5
+  vlm_score_threshold: 0.09
 
 
 
@@ -86,9 +86,9 @@ agent_cfg:
       # model: gemini-1.5-flash-001
 
 
-      # model: gpt-4o-mini 
+      model: gpt-4o-mini 
 
-      model: gpt-5-nano
+      # model: gpt-5-nano
       # model: gpt-5.2-chat-latest
 
       
@@ -124,7 +124,7 @@ sim_cfg:
 env_cfg:
   num_episodes: 1
   # max_steps: 10
-  max_steps: 20
+  max_steps: 2
   log_freq: 1
   split: val
   success_threshold: 0.3 

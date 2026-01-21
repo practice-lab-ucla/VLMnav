@@ -127,6 +127,13 @@ class VLMNavAgent(Agent):
 
 
     def __init__(self, cfg: dict):
+
+
+        self.geodesic_start_to_goal = None
+        self._saved_goal_image = False
+
+
+
         self.cfg = cfg
         self.fov = cfg['sensor_cfg']['fov']
 
@@ -180,8 +187,7 @@ class VLMNavAgent(Agent):
         self.turnaround_streak = 0
 
 
-        ## currently same as first reach
-        self.initiate_back_propagation = False
+
         self.first_reach = False
 
         # backtrack start index
@@ -227,7 +233,7 @@ class VLMNavAgent(Agent):
         self.swipping_back = False
 
 
-
+        self.path_length_m = 0.0
 
 
 
@@ -247,8 +253,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-################################################################## here is where everything come together ####################################################################
 
 
     def step(self, obs: dict):
@@ -359,19 +363,8 @@ class VLMNavAgent(Agent):
 
 
             # Step 2: Refresh observation
-            # obs = self.simWrapper.sim.get_sensor_observations(0)
-            # obs['agent_state'] = agent.get_state()
-
-
-            sim = self.simWrapper.sim
-
-            # 👇 This line makes sure the OpenGL context is current
-            sim.step_world(0.0)
-
-            obs = sim.get_sensor_observations(0)
+            obs = self.simWrapper.sim.get_sensor_observations(0)
             obs['agent_state'] = agent.get_state()
-
-
 
             # ✅ Restore 'goal' if it was present
             if hasattr(self, "last_obs") and "goal" in self.last_obs:
@@ -497,12 +490,7 @@ class VLMNavAgent(Agent):
 
 
 
-                # if (not self.initiate_back_propagation) and (next_action == 0):
-                #     print("🔁 Queued action 0 while in rewind → rewinding one more step to parent of current root")
-                #     self.step_rewind(self.tree_root_step_ndx, 0)
-
-
-                if (not self.initiate_back_propagation) and (next_action == 0):
+                if next_action == 0:
 
                     if self.swipping_back and getattr(self, "tree_root_step_ndx", None) == 0:
                         pass 
@@ -550,7 +538,19 @@ class VLMNavAgent(Agent):
 
 
         self.teleport_step_flags[self.step_ndx] = self.defer_rewind_to_root
+        # print(f"step is ##########################################################################################{self.step_ndx}")
 
+        # grid_row_col = visualize_topdown_map_with_agent(
+        #     map_path=map_path,
+        #     agent_state=agent_state,
+        #     map_origin=map_origin,
+        #     step_idx=self.step_ndx,
+        #     meters_per_pixel=self.cfg.get('meters_per_pixel', 0.005),
+        #     save_path=f"logs/topdown_step{self.step_ndx}.png",
+        #     show=False,
+        #     agent_grid_history=self.agent_grid_history,
+        #     teleport_step_flags=self.teleport_step_flags  # this includes the current step
+        # )
 
         grid_row_col = visualize_topdown_map_with_agent(
             map_path=map_path,
@@ -571,6 +571,13 @@ class VLMNavAgent(Agent):
         
 
 
+        # print("📘 Agent Grid History:")
+        # for step, (r, c) in sorted(self.agent_grid_history.items()):
+        #     print(f"  Step {step}: Grid cell (row={r}, col={c})")
+
+
+
+
         if self.step_ndx == 0:
             self.init_pos = agent_state.position
 
@@ -579,7 +586,71 @@ class VLMNavAgent(Agent):
             self._initial_pose.rotation = agent_state.rotation 
 
 
+
+#################################################################### path_find
+        ####################################################################
+        # Inside your step() method: compute and print geodesic info
+        agent_state = obs['agent_state']
+        curr_pos = np.array(agent_state.position, dtype=np.float32)
+
+        # Make sure you have stored the initial position on step 0
+        if self.step_ndx == 0 or self.init_pos is None:
+            self.init_pos = np.array(agent_state.position, dtype=np.float32)
+
+        pf = self.simWrapper.sim.pathfinder
+
+        # --- Compute full shortest path from start → current ---
+        shortest_path = habitat_sim.ShortestPath()
+        shortest_path.requested_start = np.array(self.init_pos, dtype=np.float32)
+        shortest_path.requested_end = curr_pos
+
+        found = pf.find_path(shortest_path)
+
+        if found:
+            dist_start_to_curr = float(shortest_path.geodesic_distance)
+            print(f"📏 Geodesic distance (l_i) from START to CURRENT: {dist_start_to_curr:.3f} m")
+            print(f"✅ shortest_path.geodesic_distance: {shortest_path.geodesic_distance:.3f} m")
+            print(f"✅ shortest_path.points:\n{np.array(shortest_path.points)}")
+        else:
+            print("⚠️ No navigable path found between start and current position.")
+            dist_start_to_curr = float('inf')
+        ####################################################################
+
+
+####################################################################
+        
+
+
         agent_action, metadata = self._choose_action(obs)
+
+
+
+
+
+
+        # if getattr(self, "terminate_after_local", False):
+        #     # Clear rewind state
+        #     self.tree_action_queue = []
+        #     self.defer_rewind_to_root = False
+        #     self.tree_root_state = None
+        #     self.tree_root_step_ndx = None
+
+        #     # Return STOP and mark failure
+        #     return PolarAction.stop, {
+        #         "step_metadata": {"action_number": -1, "success": 1},
+        #         "logging_data": {"note": "LOCAL_REWIND_EXHAUSTED"},
+        #         "a_final": [],
+        #         "images": {"color_sensor": obs["color_sensor"]}
+        #     }
+        
+
+
+
+        # only before goal / before back-propagation
+
+
+
+
 
 
 
@@ -591,6 +662,16 @@ class VLMNavAgent(Agent):
 
         print(f"[Step {self.step_ndx}] Global Semantic Score (GSV)AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa: {gsv:.3f}")
 
+        edges = self.generate_grid_edge_score_list_from_adjusted()
+        curr_grid = self.agent_grid_history.get(self.step_ndx)
+        path_to_curr, min_score_to_curr = modified_bfs(edges, curr_grid)
+
+        print(f"score is {min_score_to_curr} ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+        self.step_action_log_history_dict[self.step_ndx]["min_score_to_curr"] = min_score_to_curr
+
+
+
+
 
 
 
@@ -599,11 +680,8 @@ class VLMNavAgent(Agent):
             combined_score = self.step_score_history_dict[self.step_ndx] * gsv
             self.adjusted_score[self.step_ndx] = combined_score
 
-            edges = self.generate_grid_edge_score_list_from_adjusted()
         else:
             print(f"model stopped skipping adjusted score.")
-
-            edges = self.generate_grid_edge_score_list_from_adjusted()
 
             prev_step = self.step_ndx - 1
             prev_grid = self.agent_grid_history.get(prev_step)
@@ -692,51 +770,11 @@ class VLMNavAgent(Agent):
         # print("Maximized Minimum Score:", min_score)
 
 
-        if self.initiate_back_propagation and self.goal_grid_location is None:
-            if self.step_ndx in self.agent_grid_history:
-                self.goal_grid_location = self.agent_grid_history[self.step_ndx]
-                print(f"🎯 Goal grid location captured at step {self.step_ndx}: {self.goal_grid_location}")
-            else:
-                print("⚠️ Warning: Cannot capture goal grid location — not found in agent_grid_history.")
-
-
-        # if self.first_reach and self.goal_grid_location is not None:
-        if self.initiate_back_propagation:
-            print("📊 Grid Transitions with Adjusted Scores:")
-            # edges = self.generate_grid_edge_score_list_from_adjusted()
-            for r1, c1, r2, c2, score in edges:
-                print(f"({r1}, {c1})-({r2}, {c2}): {score}")
-
-            path, min_score = modified_bfs(edges, self.goal_grid_location)
-
-            print("✅ Running Modified BFS After Goal Reached")
-            print("📍 Goal:", self.goal_grid_location)
-            print("🏁 Best Path:", path)
-            print("📉 Maximized Minimum Score:", min_score)
-
-
-            self.best_bfs_path = set(path)
-            self.best_bfs_min = min_score
-
-
-            if self.best_bfs_min is not None:
-                print(f"🔻 BFS bottleneck score before stopping: {self.best_bfs_min:.3f}")
-            else:
-                print("🔻 BFS bottleneck score before stopping: None")
-
-
-        else:
-            print("⏳ Awaiting goal reach... BFS not triggered yet.")
         
 
 
         ##### calculate number of turns for warning purpose #####
         selected_action = metadata['step_metadata']['action_number']
-
-
-
-
-
 
 
         if selected_action == 0:
@@ -746,66 +784,10 @@ class VLMNavAgent(Agent):
 
 
 
-        # if (selected_action == 0 and not self.initiate_back_propagation and self.tree_root_state is not None and self.tree_action_queue):
-        #     # We’re in the middle of a sibling-walk; keep rewinding to this root
-        #     should_rewind_to_sibling = True
-
-        # ################# only do rewind to state when we ARE backtracking ##################
-
-        # should_rewind_to_sibling = False
 
 
 
         curr_grid = self.agent_grid_history.get(self.step_ndx)
-
-        should_rewind_to_sibling = False
-
-
-
-
-
-
-
-
-
-
-
-        if self.initiate_back_propagation:
-            # evaluate all rewind triggers first
-            trigger_rewind = (
-                selected_action == 0
-                or self.goal_reached
-                or (curr_grid is not None and curr_grid in self.best_bfs_path)
-            )
-
-            if trigger_rewind:
-                if self.first_reach:
-                    # First reach → do NOT rewind yet
-                    print("✅ First reach detected — skipping rewind this time")
-                    self.tree_action_queue = []
-                    self.first_reach = False
-                else:
-                    # Any subsequent time → do rewind
-                    if selected_action == 0:
-                        print("🔁 Turn-around detected → will rewind to next sibling")
-                    elif self.goal_reached:
-                        print("🔁 Goal reached on this branch → will rewind to next sibling")
-                    else:
-                        print(f"🔁 On BFS best-path grid {curr_grid} → will rewind to next sibling")
-                    should_rewind_to_sibling = True
-
-        if should_rewind_to_sibling:
-            self.defer_rewind_to_root = True
-
-
-
-
-
-
-
-
-        
-
 
 
 
@@ -841,251 +823,19 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
-
-
-
-
-
-
         # If we're already backtracking and standing on a node of the best BFS path,
         # skip re-traversing it—rewind to explore a different branch.
         if self.goal_reached:
             print("goal reached^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+
+
         else:
             print("goal not reached^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 
 
 
 
-
-
-
-
-
-
-        if self.initiate_back_propagation and self.goal_reached and not self.tree_action_queue:
-            # print(f"🔁 Initiating backtrack: min adjusted score = {self.min_score:.3f} at step {self.min_step}")
-            # backtrack_success, a_final = self.rewind_and_explore_from_log_state(self.min_score, self.start_ndx)
-
-            min_thresh = self.best_bfs_min
-
-            
-
-            if min_thresh is None:
-                min_thresh = 1.0
-                self.best_bfs_min = 1.0
-
-            print(f"🔁 Initiating backtrack with BFS min = {min_thresh:.3f} ")
-            print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-            self.start_ndx = max(self.step_ndx - 1, 0)
-            backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
-
-            raw_action_image = obs['color_sensor'].copy()
-            chosen_action_image = obs['color_sensor'].copy()
-
-            self._project_onto_image(
-                metadata['a_final'] if 'a_final' in metadata else [],
-                raw_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-            self._project_onto_image(
-                [], 
-                chosen_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-
-            self.step_ndx += 1
-
-            if backtrack_success:
-                print("action foundddddddddddddddddddddddddddddddddddd")
-                return None, {
-                    'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'backtrack from best BFS node',
-                                     'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
-        '                               STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None)},
-                    'a_final': a_final or [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-            else:
-                print("🛑 No further rewind options from best-path node — stopping")
-                self.overall_stop = True
-                return PolarAction.stop, {
-                    'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {
-                        'note': 'backtracking exhausted from best-path node',
-                        'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
-                        'STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None),
-                        
-                    },
-                    'a_final': [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-
-
-
-
-        # if self.initiate_back_propagation and len(self.tree_action_queue) == 1 and selected_action == 0:
-        if self.initiate_back_propagation and not self.tree_action_queue and selected_action == 0:
-
-            print("🔚 Finished all sub-actions at current rewind step")
-
-            min_thresh = self.best_bfs_min 
-
-
-            self.start_ndx = max(self.step_ndx - 1, 0)
-            print(f"🔁 Trying deeper rewind to step {self.start_ndx} with min_score {min_thresh:.3f}")
-            backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
-
-            print("first trigger+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-
-            if backtrack_success:
-                print(f"✅ Found new rewind target at step")
-                # return None, {
-                #     'step_metadata': {'action_number': -3, 'success': 1},
-                #     'logging_data': {'note': 'deeper backtrack initiated'},
-                #     'a_final': a_final,
-                #     'images': {'color_sensor': obs['color_sensor']}
-                # }
-            raw_action_image = obs['color_sensor'].copy()
-            chosen_action_image = obs['color_sensor'].copy()
-
-            # Project all actions WITHOUT highlight → raw image
-            self._project_onto_image(
-                metadata['a_final'],
-                raw_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-
-            # Project all actions WITH highlight → chosen image
-            self._project_onto_image(
-                metadata['a_final'],
-                chosen_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor'],
-                chosen_action=0
-            )
-            
-            
-            self.step_ndx += 1
-
-
-            if backtrack_success:
-                return None, {
-                    'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'deeper backtrack initiated'},
-                    'a_final': a_final,
-                    'images': {
-                        'color_sensor': raw_action_image,              # ✅ now has arrows
-                        'color_sensor_chosen': chosen_action_image     # ✅ arrows + highlight
-                    }
-                }
-            else:
-                print("🛑 No further rewind options — stopping")
-                self.overall_stop = True
-                return PolarAction.stop, {
-                    'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {'note': 'backtracking exhausted'},
-                    'a_final': [],
-                    'images': {'color_sensor': obs['color_sensor']}
-                }
-
-
-
-
-
-
-################################################################################################################################################
-
-        # Current grid (row, col) for this step
-        
-
-
-
-        if (self.initiate_back_propagation and curr_grid in self.best_bfs_path and not self.goal_reached and not self.tree_action_queue):
-
-            print(f"🟡 Backtracking and on best BFS path at step {self.step_ndx}, grid={curr_grid} → rewinding to explore a different branch")
-
-            min_thresh = self.best_bfs_min 
-
-            self.start_ndx = max(self.step_ndx - 1, 0)
-            backtrack_success, a_final = self.rewind_and_explore_from_log_state(min_thresh, self.start_ndx)
-
-            raw_action_image = obs['color_sensor'].copy()
-            chosen_action_image = obs['color_sensor'].copy()
-
-            self._project_onto_image(
-                metadata['a_final'] if 'a_final' in metadata else [],
-                raw_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor']
-            )
-            self._project_onto_image(
-                metadata['a_final'] if 'a_final' in metadata else [],
-                chosen_action_image,
-                obs['agent_state'],
-                obs['agent_state'].sensor_states['color_sensor'],
-                chosen_action=0
-            )
-
-            self.step_ndx += 1
-
-            if backtrack_success:
-                return None, {
-                    'step_metadata': {'action_number': -3, 'success': 1},
-                    'logging_data': {'note': 'backtrack from best BFS node'},
-                    'a_final': a_final or [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-            else:
-                print("🛑 No further rewind options from best-path node — stopping")
-                self.overall_stop = True
-                return PolarAction.stop, {
-                    'step_metadata': {'action_number': -1, 'success': 1},
-                    'logging_data': {
-                        'note': 'backtracking exhausted from best-path node',
-                        'STOPPING RESPONSE': getattr(self, 'last_stopping_response', None),
-                        'STOPPING PROMPT': getattr(self, 'last_stopping_prompt', None),
-                        
-                    },
-                    'a_final': [],
-                    'images': {
-                        'color_sensor': raw_action_image,
-                        'color_sensor_chosen': chosen_action_image
-                    }
-                }
-
-
-################################################################################################################################################
-
-
-
-
-    
-
-
-        ################# only do step rewind when we are NOT backtracking ##################
-
-        # if (not self.initiate_back_propagation) and (selected_action == 0):
-        #     self.step_rewind(self.step_ndx, selected_action)
-
-
-        if (not self.initiate_back_propagation) and (selected_action == 0):
+        if selected_action == 0:
             if self.swipping_back:
                 # We are back-swiping: pick another global best untried option
                 if not self.swipe_back_all_steps():
@@ -1112,9 +862,9 @@ class VLMNavAgent(Agent):
 
         selected_action = metadata['step_metadata']['action_number']
         # If we're in global back-swipe mode (pre-goal), keep swiping until the goal is reached
-        if self.swipping_back and not self.initiate_back_propagation and not getattr(self, "defer_rewind_to_root", False) and selected_action == 0:
+        if self.swipping_back and not getattr(self, "defer_rewind_to_root", False) and selected_action == 0:
             if getattr(self, "tree_root_step_ndx", None) == 0:
-                pass  # allow; do NOT re-sweep here
+                pass  # allow; do NOT re-sweep here at root
             
             else:
                 if self.swipe_back_all_steps():
@@ -1158,7 +908,7 @@ class VLMNavAgent(Agent):
 
 
 
-        if (not self.initiate_back_propagation) and getattr(self, "terminate_after_local", False ) and not self.swipping_back:
+        if getattr(self, "terminate_after_local", False ) and not self.swipping_back:
             # Clear local rewind bookkeeping
             self.tree_action_queue = []
             self.defer_rewind_to_root = False
@@ -1314,8 +1064,52 @@ class VLMNavAgent(Agent):
 
 
         return agent_action, metadata
-    
 
+
+
+
+    def _accumulate_rewind_distance(self, from_step: int, to_step: int):
+        """
+        When we teleport from from_step back to an ancestor to_step,
+        we still want to charge the path length as if we had walked
+        back along the recorded trajectory.
+
+        This walks parent_by_step: from_step -> parent -> ... -> to_step,
+        summing Euclidean distances between logged positions.
+        """
+        if from_step is None or to_step is None:
+            return
+        if from_step <= to_step:
+            return
+
+        import numpy as np
+
+        traveled = 0.0
+        s = from_step
+        # Walk upwards until we reach the ancestor to_step
+        while s > to_step:
+            parent = self.parent_by_step.get(s)
+            if parent is None:
+                break
+
+            child_log = self.step_action_log_history_dict.get(s)
+            parent_log = self.step_action_log_history_dict.get(parent)
+            if child_log is None or parent_log is None:
+                break
+
+            p_child = np.array(child_log["position"], dtype=np.float32)
+            p_parent = np.array(parent_log["position"], dtype=np.float32)
+            seg = float(np.linalg.norm(p_child - p_parent))
+            traveled += seg
+
+            s = parent
+
+        if traveled > 0.0:
+            self.path_length_m += traveled
+            print(
+                f"🔁 Rewind virtual travel {from_step} → {to_step}: "
+                f"{traveled:.3f} m (total={self.path_length_m:.3f} m)"
+            )
 
 
 
@@ -1377,8 +1171,6 @@ class VLMNavAgent(Agent):
 
 
 
-
-
     def swipe_back_all_steps(self):
         """
         Scan ALL previous steps for the highest-score UNTRIED non-zero action.
@@ -1413,20 +1205,25 @@ class VLMNavAgent(Agent):
                     continue
 
 #####################################################################################               
-                # sc = a.get("adjusted")
-                # if sc is None:
-                #     sc = a.get("score", 0.0)
-                # candidates.append((idx, float(sc)))
+                sc = a.get("adjusted")
+                if sc is None:
+                    sc = a.get("score", 0.0)
+                candidates.append((idx, float(sc)))
 
 
 #####################################################################################
-                sc = a.get("adjusted")
-                bfs_min = log.get("min_score_to_curr")
-                if bfs_min is None:
-                    bfs_min = 0.0 
+                # sc = a.get("adjusted")
 
-                new_score = 10.0 * min(sc, bfs_min) + max(sc, bfs_min)
-                candidates.append((idx, new_score))
+                # threshold = float(self.cfg.get('vlm_score_threshold', 0.0))
+                # if sc <= threshold:
+                #     continue
+
+                # bfs_min = log.get("min_score_to_curr")
+                # if bfs_min is None:
+                #     bfs_min = 0.0 
+
+                # new_score = 10.0 * min(sc, bfs_min) + max(sc, bfs_min)
+                # candidates.append((idx, new_score))
 #####################################################################################
 
 
@@ -1441,6 +1238,13 @@ class VLMNavAgent(Agent):
             best_idx, _ = candidates[0]
 
             # Rebuild agent state at that step (same quat convention as rewind)
+
+
+
+
+            self._accumulate_rewind_distance(self.step_ndx, back_step)
+
+
             restored = AgentState()
             restored.position = np.array(log["position"], dtype=np.float32)
             q = np.array(log["rotation"], dtype=np.float32)  # [w, x, y, z]
@@ -1496,44 +1300,25 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
     def step_rewind(self, current_step: int, selected_action: int):
         # Only trigger on action 0
         if selected_action != 0:
             return
 
-        # # If we’re at initial pose or step 0, no-op
-        # if self._at_state(self._initial_pose) or current_step <= 0:
-        #     return
-
-
         parent_step = self.parent_by_step.get(current_step)
 
-
         if parent_step is None:
-
             print("the agent is at the initial state +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
             # No parent to rewind to (e.g., step 0 root). Do nothing here so the
             # caller will execute the actual turn-around action (action 0) in-place.
             return
 
-
         print(f"🌳 [step_rewind] Rewinding from step {current_step} → parent step {parent_step}========================================")
-        if parent_step is None:
-            parent_step = current_step - 1  # conservative fallback
 
+        # 1) Charge the virtual distance for walking back along the path
+        self._accumulate_rewind_distance(current_step, parent_step)
 
-
-
-
-
-
-            
-
-        # Build queue and restore pose from the *parent* step
+        # 2) Rebuild the rewind root state and action queue for that parent step
         def build_queue_from_root(root_step: int):
             ranking = self.step_action_ranking_dict.get(root_step)
             prev_log = self.step_action_log_history_dict.get(root_step)
@@ -1541,16 +1326,7 @@ class VLMNavAgent(Agent):
                 return None, None, None
 
             tried = self.tried_actions_by_step.get(root_step, set())
-            # remaining = [i for i, _ in ranking if i not in tried and i != 0]
             remaining = [i for i, _ in ranking if i not in tried]
-
-
-            # remaining = [i for i, _ in ranking if i not in tried and i != 0]
-            # if 0 not in tried:
-            #     remaining.append(0)
-
-
-
 
             from habitat_sim import AgentState
             import numpy as np
@@ -1565,9 +1341,10 @@ class VLMNavAgent(Agent):
 
             actions = prev_log.get('actions') or []
             sorted_actions = sorted(actions, key=lambda a: int(a.get('index', 0)))
-            a_final = [(a['distance'], a['angle']) for a in sorted_actions if int(a.get('index', 0)) != 0]
-            # a_final = [(a['distance'], a['angle']) for a in sorted_actions]
-
+            # Build a_final, skipping index 0 (turnaround)
+            a_final = [(a['distance'], a['angle'])
+                    for a in sorted_actions
+                    if int(a.get('index', 0)) != 0]
 
             max_idx = 0
             for a in actions:
@@ -1594,7 +1371,7 @@ class VLMNavAgent(Agent):
             self.terminate_after_local = True
             return
 
-        # Set rewind root to the parent step and teleport there on next tick
+        # 3) Arm the rewind root so top-of-step() will teleport and execute from parent_step
         self.tree_root_state = restored
         self.tree_root_a_final = a_final
         self.tree_action_queue = remaining
@@ -1603,9 +1380,6 @@ class VLMNavAgent(Agent):
         self.rewind_origin_step = parent_step
         self.immediate_turnaround_by_root.setdefault(parent_step, set())
         self.defer_rewind_to_root = True
-
-
-
 
 
 
@@ -1843,6 +1617,14 @@ class VLMNavAgent(Agent):
 
     def reset(self):
 
+        self.geodesic_start_to_goal = None
+        self._saved_goal_image = False
+
+
+
+        self.goal_reached = False 
+        self.run_result = False
+        self.steps_taken = 0
         self.tree_action_queue = []
         self.tree_root_state = None
         self.tree_root_score_log = []
@@ -1876,7 +1658,7 @@ class VLMNavAgent(Agent):
         self.turnaround_streak = 0
         
 
-        self.initiate_back_propagation = False
+
         self.first_reach = False
 
         self.start_ndx = []
@@ -1911,6 +1693,8 @@ class VLMNavAgent(Agent):
 
         self.parent_by_step = {}
         self.swipping_back = False
+
+        self.path_length_m = 0.0
 
 
 
@@ -2824,8 +2608,29 @@ class VLMNavAgent(Agent):
 
 
 
-            print(f"✅ Normalized confident scores: {conf_scores_norm}")
-            # print(f"⭐ Max score (used as 'score'): {step_metadata['score']}")
+
+
+
+
+
+#################################################### filter part ####################################
+
+
+
+
+
+            # --- Print detailed action info right after normalization ---
+            if a_final is not None and len(a_final) == len(conf_scores_norm):
+                print("\n🎯 Action candidates after normalization:")
+
+                # Shift so last element (turnaround) becomes first
+                shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
+
+                for i, ((r, theta), score) in enumerate(shifted_pairs):
+                    print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                        f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {score * self.global_semantic_score:.5f}")
+            else:
+                print("⚠️ a_final or conf_scores_norm length mismatch — cannot print detailed action info.")
 
 
 
@@ -2833,16 +2638,28 @@ class VLMNavAgent(Agent):
 
 
 
-
-
-
-
-            # Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)
-            action_ranking = sorted(
-                [(i, score) for i, score in enumerate(conf_scores_norm)],
-                key=lambda x: -x[1]
-            )
+            action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, adjusted_scores, high_indices = self._online_filter(a_final, conf_scores_norm)
+            # Save ranking for later modules (rewind, logging, etc.)
             self.step_action_ranking_dict[self.step_ndx] = action_ranking
+
+            print(f"\n🏅 action_ranking = {action_ranking}")
+            if not action_ranking:  # means empty list → no valid action survived threshold
+                print("⚠️ No valid actions found — forcing turnaround (action 0)")
+                step_metadata['action_number'] = 0
+
+
+
+
+
+
+            # # Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)  Save sorted action indices by score (highest to lowest)
+            # action_ranking = sorted(
+            #     [(i, score) for i, score in enumerate(conf_scores_norm)],
+            #     key=lambda x: -x[1]
+            # )
+            # self.step_action_ranking_dict[self.step_ndx] = action_ranking
+            # print(f"\n🏅 action_ranking = {action_ranking}")
+
 
 
 
@@ -2850,19 +2667,12 @@ class VLMNavAgent(Agent):
 
 
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+            step_number = self.step_ndx
             conf_scores = step_metadata['confident_score']
             a_final = list(a_final)
-            step_number = self.step_ndx
+
 
             self.step_score_history_dict[step_number] = step_metadata['score']
-
-            # print("📊 Step Score History:")
-            # for step, score in self.step_score_history_dict.items():
-            #     print(f"  Step {step}: Score = {score}")
-
-
-            # Save log entry for this step
-
 
             self._record_log_entry(step_number, a_final, conf_scores, turnaround_available)
 
@@ -2895,9 +2705,7 @@ class VLMNavAgent(Agent):
 
 
         return step_metadata, logging_data, response
-
-
-
+    
 
     def _record_log_entry(self, step_number, a_final, conf_scores, turnaround_available):
         """
@@ -2979,22 +2787,61 @@ class VLMNavAgent(Agent):
         self.parent_by_step[step_number] = parent
 
 
+        if parent is not None:
+            prev_log = self.step_action_log_history_dict.get(parent)
+        else:
+            prev_log = None
+
+
+
+
 
 
 
         log_entry = {
-            "step": step_number,
-            # "position": [round(float(p), 2) for p in pos],
-            "position": [round(float(p), 6) for p in pos],
+            "step": int(step_number),
+            "position": [float(pos[0]), float(pos[1]), float(pos[2])],
             "rotation": [float(rot.w), float(rot.x), float(rot.y), float(rot.z)],
-            "grid_current": grid_current,
             "grid_from": grid_from,
-            "actions": actions
+            "grid_current": grid_current if 'grid_current' in locals() else None,
+            "actions": actions,
+            "parent": parent,
         }
+
 
         # Save to log
         self.step_action_log_history_dict[step_number] = log_entry
         self.step_action_log.append(log_entry)
+
+
+
+        if prev_log is not None:
+
+            p_prev = np.array(prev_log["position"], dtype=np.float32)
+            p_curr = np.array(log_entry["position"], dtype=np.float32)
+            step_dist = float(np.linalg.norm(p_curr - p_prev))
+
+            self.path_length_m += step_dist
+
+
+
+            log_entry["path_length_so_far"] = self.path_length_m
+
+            print(
+                f"🚶 Forward travel {parent} → {step_number}: "
+                f"{step_dist:.3f} m (total={self.path_length_m:.3f} m)"
+            )
+        else:
+            log_entry["path_length_so_far"] = self.path_length_m
+
+
+
+
+
+
+
+
+
 
         # Print human-readable format
         print(f"Step {log_entry['step']}")
@@ -3020,7 +2867,64 @@ class VLMNavAgent(Agent):
 
 
 
+    def _online_filter(self, a_final, conf_scores_norm, threshold=None):
+        """
+        Online filter that selects high-confidence actions and returns ranking.
+        Now includes the same printed output as before.
+        """
+        if threshold is None:
+            threshold = self.cfg.get('vlm_score_threshold', 0.0)
 
+        # Guard conditions
+        if a_final is None or conf_scores_norm is None or len(a_final) != len(conf_scores_norm):
+            print("⚠️ Cannot compute adjusted scores (length mismatch).")
+            return [], [], [], [], [], []
+
+        gsv = float(self.global_semantic_score or 0.0)
+        adjusted_scores = [score * gsv for score in conf_scores_norm]
+        high_indices = [i for i, adj in enumerate(adjusted_scores) if adj > threshold]
+
+        # Reconstruct shifted pairs (turnaround first)
+        shifted_pairs = [(a_final[-1], conf_scores_norm[0])] + list(zip(a_final[:-1], conf_scores_norm[1:]))
+
+        if high_indices:
+            print(f"\n✅ Indices with adjusted score > threshold ({threshold:.3f}): {high_indices}")
+            print("🎯 Detailed info for high-confidence actions:")
+            for i in high_indices:
+                (r, theta), score = shifted_pairs[i]
+                adjusted_val = score * gsv
+                print(f"  Action {i}: angle = {theta:.5f} rad ({np.degrees(theta):.3f}°), "
+                    f"distance = {r:.5f} m, score = {score:.5f}, adjusted = {adjusted_val:.5f}")
+        else:
+            print(f"⚠️ No actions exceeded threshold {threshold:.3f}.")
+ 
+
+        # Build filtered structure
+        high_conf_actions = []
+        orig_indices_filtered = []
+        for i in high_indices:
+            (r, theta), score = shifted_pairs[i]
+            adjusted_val = score * gsv
+            high_conf_actions.append({
+                "index": int(i),
+                "distance": round(float(r), 4),
+                "angle": round(float(theta), 5),
+                "score": round(float(score), 5),
+                "adjusted": round(float(adjusted_val), 5)
+            })
+            orig_indices_filtered.append(int(i))
+
+        a_final_filtered = [(float(h['distance']), float(h['angle'])) for h in high_conf_actions]
+        conf_scores_filtered = [float(h['score']) for h in high_conf_actions]
+
+        # Rank and print results
+        action_ranking = sorted(
+            [(orig_indices_filtered[i], conf_scores_filtered[i]) for i in range(len(conf_scores_filtered))],
+            key=lambda x: -x[1]
+        )
+
+
+        return action_ranking, a_final_filtered, conf_scores_filtered, high_conf_actions, adjusted_scores, high_indices
 
 
 
@@ -3606,47 +3510,41 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
+#########################################################################################3
 
 
 
-
-
-############################################################################################# NAV agent####################################################3
-
-
-
-        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
-        if len(self.stopping_calls) >= 1 and self.stopping_calls[-1] == self.step_ndx and not self.initiate_back_propagation:
-
-            if not self.first_reach:
-                self.start_ndx=self.step_ndx - 1
-
-
-                self.first_reach = True
-
-                if self.first_reach == True:
-                    self._save_goal_image_once(obs, images)
-                    
-
-
-
-
-
-            print(11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111)
-
-
-
-
-        # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1 and not self.initiate_back_propagation:
 
         if len(self.stopping_calls) >= 1 and self.stopping_calls[-1] == self.step_ndx:
+
+
+
         # if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
 
-
-            self.initiate_back_propagation = True
-
             self.goal_reached = True
-            self.run_result = True
+
+            self._save_goal_image_once(obs)
+
+
+
+
+
+
+
+            if self.geodesic_start_to_goal is None:
+                self.geodesic_start_to_goal = self._compute_start_to_current_geodesic(obs)
+
+
+
+
+
+
+
+
+
+
+            self.run_result = True 
+            self.steps_taken = self.step_ndx
 
             self.goal_steps.add(self.step_ndx)
 
@@ -3660,30 +3558,16 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-            # ############ for testing only #############
-            # agent_action = PolarAction.stop
-            # return agent_action, {
-            #     'step_metadata': {'action_number': -2, 'success': 1},
-            #     'logging_data': {'note': 'backtrack initiated'},
-            #     'a_final': a_final,
-            #     'images': {'color_sensor': obs['color_sensor']}
-            # }
-            # ############ for testing only #############
 
+            ### at online we want the agent to stop immediately
 
-            return None, {
+            agent_action = PolarAction.stop
+            return agent_action, {
                 'step_metadata': {'action_number': -2, 'success': 1},
-                'logging_data': {'note': 'backtrack initiated'},  
+                'logging_data': {'note': 'backtrack initiated'},
                 'a_final': a_final,
                 'images': {'color_sensor': obs['color_sensor']}
             }
-  
-
-
-
-
-
-
 
         global_angles = []
 

@@ -42,8 +42,9 @@ class Env:
         Args:
             cfg (dict): Configuration dictionary containing environment, simulation, and agent settings.
         """
-
+        # self.distance_to_goal = 0
         self.distance_to_goal = float('inf')
+
 
 
         self.cfg = cfg['env_cfg']
@@ -77,14 +78,8 @@ class Env:
         if not os.path.exists(self.worker_csv):
             with open(self.worker_csv, 'w', newline='') as f:
                 w = csv.writer(f)
-                
-                # w.writerow(['episode_ndx', 'scene_id', 'bfs_min'])
-                w.writerow([
-                    'episode_ndx', 'scene_id',
-                    'run_result', 'distance_to_g',
-                    'dis_true', 'real_true',
-                    'bfs_min'
-                ])
+
+                w.writerow(['episode_ndx', 'scene_id', 'run_result', 'steps_taken', 'distance_to_g', 'dis_true', 'real_true', 'dataset_geodesic', 'geo_start_to_goal', 'path_length_m'])
 
         # ============================
 
@@ -162,7 +157,7 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        # episode_ndx = 525
+        # episode_ndx = 8
 
 
         obs = self._initialize_episode(episode_ndx)
@@ -210,6 +205,9 @@ class Env:
                     print("S")
                     print("S")
                     continue
+
+
+                #### if we dont want the conf score to discourage the distance set the second entry to 0
             
                 agent_action = self.agent._adjust_action_distance(agent_action, 1.0)
                 print("111111111111111111111111111111111111111111111111111111111111111111111111111111111")
@@ -264,42 +262,51 @@ class Env:
 
         print("the agent is stopping @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
 
-
-
         run_result = self.agent.run_result
-
-
-
-
-        bfs_min = self.agent.best_bfs_min
-        print("Best BFS Min Score:", bfs_min)
-        # append a row to this worker's CSV
+        steps_taken = self.agent.steps_taken 
         scene_id = getattr(self.simWrapper, 'scene_id', '')
-        # with open(self.worker_csv, 'a', newline='') as f:
-        #     csv.writer(f).writerow([self.current_episode_ndx, scene_id, bfs_min])
 
-
-        # Calculate final distance to goal
+        # final distance to goal from _calculate_metrics
         distance_to_g = self.distance_to_goal
         dis_true = False
         real_true = False
-        print("test final distance with envvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv", distance_to_g)
-
 
         # Compare with d_goal threshold from config
         d_goal = self.cfg.get('d_goal', None)
         if d_goal is not None and distance_to_g < d_goal:
             dis_true = True
 
-        # If both run_result and dis_true are True → mark real_true = True
         if dis_true and run_result:
             real_true = True
 
+        # --- NEW: extra metrics for logging ---
+
+        # 1) Dataset geodesic distance (start -> goal) saved in _initialize_episode
+        dataset_geodesic = getattr(self, 'dataset_geodesic', None)
+
+        # 2) shortest_path.geodesic_distance at STOP,
+        #    stored as geodesic_start_to_goal when stopping head fires
+        geo_start_to_goal = getattr(self.agent, 'geodesic_start_to_goal', None)
+
+        # 3) Executed + rewind path length (already tracked in agent)
+        path_length_m = getattr(self.agent, 'path_length_m', None)
+
         with open(self.worker_csv, 'a', newline='') as f:
             csv.writer(f).writerow([
-                self.current_episode_ndx, scene_id, run_result,
-                distance_to_g, dis_true, real_true, bfs_min
+                self.current_episode_ndx,
+                scene_id,
+                run_result,
+                steps_taken,
+                distance_to_g,
+                dis_true,
+                real_true,
+                dataset_geodesic,
+                geo_start_to_goal,
+                path_length_m
             ])
+
+
+
 
 
 
@@ -345,17 +352,9 @@ class Env:
             if not step_metadata['success']:
                 path += '_ERROR'
             os.makedirs(path, exist_ok=True)
-
-
-            keep_images = {"color_sensor_triplet_projected", "color_sensor", "voxel_map"}
-
-
             for name, im in images.items():
-                if name not in keep_images:
-                    continue
                 im = Image.fromarray(im[:, :, 0:3], mode='RGB')
                 im.save(f'{path}/{name}.png')
-
             with open(f'{path}/details.txt', 'w') as file:
                 if step_metadata['success']:
                     for k, v in logging_data.items():
@@ -376,31 +375,19 @@ class Env:
         """
         metrics = {}
         self.path_calculator.requested_start = agent_state.position
-
-
-        current_distance = self.simWrapper.get_path(self.path_calculator)
-
-        # ✅ Update distance_to_goal only before the first reach.
-        # Once agent.first_reach is True, keep the first distance we had.
-        if not getattr(self.agent, "first_reach", False):
-            self.distance_to_goal = current_distance
-
-        # Log the (possibly frozen) distance
-        metrics['distance_to_goal'] = self.distance_to_goal
-
-
-
-
-
-
+        metrics['distance_to_goal'] = self.simWrapper.get_path(self.path_calculator)
 
         self.distance_to_goal = metrics['distance_to_goal'] 
-        
+
+
         metrics['spl'] = 0
         metrics['goal_reached'] = False
         metrics['done'] = False
         metrics['finish_status'] = 'running'
 
+
+
+        # print("test final distance with envvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",metrics['distance_to_goal'])
 
 
 
@@ -639,6 +626,11 @@ class ObjectNavEnv(Env):
         }
         self.init_pos = np.array(episode['start_position'])
 
+        print(f"ddddddddddddddddddddddddddddddddddddddddddddddddddddddataset geodesic_distance (start → closest goal): "
+        f"{episode['info']['geodesic_distance']:.3f} m")
+        self.dataset_geodesic = float(episode['info']['geodesic_distance'])
+
+
 
         ######################################### extract map #############################################
         height = float(self.init_pos[1])  # agent's initial y-position
@@ -691,12 +683,7 @@ class ObjectNavEnv(Env):
         self.simWrapper.set_state(pos=self.init_pos, quat=rotation)
         self.curr_run_name = f"{episode_ndx}_{self.simWrapper.scene_id}"
 
-
-
         obs = self.simWrapper.step(PolarAction.null)
-
-
-
         return obs
 
     # def _step_env(self, obs: dict):
@@ -713,12 +700,12 @@ class ObjectNavEnv(Env):
         """
         super()._step_env(obs)
         obs['goal'] = self.current_episode['object']
-        obs['episode_name'] = self.curr_run_name
-
-
         agent_state = obs['agent_state']
         self.agent_distance_traveled += np.linalg.norm(agent_state.position - self.prev_agent_position)
         self.prev_agent_position = agent_state.position
+
+
+        obs["episode_name"] = self.curr_run_name
         agent_action, metadata = self.agent.step(obs)
 
 
