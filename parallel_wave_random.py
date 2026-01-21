@@ -150,6 +150,7 @@ if __name__ == "__main__":
                             "dis_true": r.get("dis_true", ""),
                             "real_true": r.get("real_true", ""),
                             "bfs_min": r.get("bfs_min", ""),
+                            "error": r.get("error", ""),
                         })
 
             fieldnames = [
@@ -161,6 +162,7 @@ if __name__ == "__main__":
                 "dis_true",
                 "real_true",
                 "bfs_min",
+                "error",
             ]
 
             with combined_out.open("w", newline="", encoding="utf-8") as fp:

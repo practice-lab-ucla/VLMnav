@@ -227,7 +227,7 @@ class VLMNavAgent(Agent):
         self.swipping_back = False
 
 
-
+        self.no_candidate_actions_by_step = {}
 
 
 
@@ -1912,7 +1912,7 @@ class VLMNavAgent(Agent):
         self.parent_by_step = {}
         self.swipping_back = False
 
-
+        self.no_candidate_actions_by_step = {}
 
 
         ####################################################### initialize a csv file that saves the RRT score ###########################3
@@ -2511,6 +2511,7 @@ class VLMNavAgent(Agent):
         # higher-level logic will fall back to action 0 (turn around).
         has_unexplored = any(is_unexplored for _, _, is_unexplored in arrowData)
         if not arrowData or not has_unexplored:
+
             return []
 
 
@@ -3616,6 +3617,9 @@ class ObjectNavAgent(VLMNavAgent):
 
         # Remember whether preprocessing produced any candidate actions.
         no_candidate_actions = len(a_final) == 1
+
+
+        self.no_candidate_actions_by_step[self.step_ndx] = no_candidate_actions
 
 
 
