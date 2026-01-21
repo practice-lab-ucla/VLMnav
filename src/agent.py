@@ -2381,7 +2381,8 @@ class VLMNavAgent(Agent):
             rgb_image, depth_image, agent_state, sensor_state
         )
 
-        sensor_range = np.deg2rad(self.fov / 2) * 1.5
+        # sensor_range = np.deg2rad(self.fov / 2) * 1.5
+        sensor_range = np.deg2rad(self.fov / 2) * 1.0
         center_half_fov_rad = np.deg2rad(self.fov / 2.0)
 
         all_thetas = np.linspace(-sensor_range, sensor_range, self.cfg['num_theta'])
@@ -2786,16 +2787,37 @@ class VLMNavAgent(Agent):
         logging_data = {}
         try:
             response_dict = self._eval_response(response)
-            step_metadata['action_number'] = int(response_dict['action'])
+            raw_action = int(response_dict['action'])
+
+            # ----------------- NEW: enforce valid action range -----------------
+            num_actions = len(a_final)              # how many actions are actually shown
+            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+
+            # valid “normal” actions: 1..num_actions (you can still allow 0 separately)
+            valid_actions = list(range(1, num_actions + 1))
+
+            # If the model proposes something out of range, force action 0
+            if (raw_action not in valid_actions) and (raw_action != 0):
+                logging.warning(
+                    f"VLM proposed invalid action {raw_action}; "
+                    f"valid actions: {valid_actions} (plus 0 for turnaround). "
+                    f"Falling back to action 0."
+                )
+                sanitized_action = 0
+            else:
+                sanitized_action = raw_action
+
+            step_metadata['action_number'] = sanitized_action
+            # ----------------- END NEW BLOCK -----------------
 
             self._link_parent_for_next_step(self.step_ndx)
 
             print("trigger 222222222222222222222222222222222222222222222222222222222222")
 
-
             if self.step_ndx not in self.tried_actions_by_step:
                 self.tried_actions_by_step[self.step_ndx] = set()
             self.tried_actions_by_step[self.step_ndx].add(step_metadata['action_number'])
+
 
 
 
@@ -3593,7 +3615,9 @@ class ObjectNavAgent(VLMNavAgent):
 
 
         # Remember whether preprocessing produced any candidate actions.
-        no_candidate_actions = len(a_final) == 0
+        no_candidate_actions = len(a_final) == 1
+
+
 
 
 
