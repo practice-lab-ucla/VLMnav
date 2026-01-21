@@ -3258,9 +3258,6 @@ class ObjectNavAgent(VLMNavAgent):
 
             stopping_prompt = (
                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-                    f"The image is a fusion of three views from one position: "
-                    f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
-                    f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
                     f"Your job is to decide if the agent is VERY CLOSE from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
                     f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
@@ -3314,9 +3311,6 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-                f"The image is a fusion of three views from one position: "
-                f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
-                f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to REWIND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "

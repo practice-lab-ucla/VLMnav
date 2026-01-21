@@ -64,8 +64,10 @@ agent_cfg:
 
 
 
-  agent_radius: 0.1
-  clearance_m: 0.05 
+  # agent_radius: 0.1
+  agent_radius: 0.0
+  # clearance_m: 0.05 
+  clearance_m: 0.00
   Depth_aware: True # turn it on if we want obstacle avoidance
 
 
@@ -91,7 +93,8 @@ agent_cfg:
 
 sim_cfg:
   agent_height: 0.9
-  agent_radius: 0.1
+  # agent_radius: 0.1
+  agent_radius: 0.0
 
 
 
