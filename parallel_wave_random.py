@@ -11,7 +11,7 @@ import random
 # ========================== CONFIG ==========================
 WAVE_SIZE = 15
 NUM_WAVES = 20
-MAX_STEPS = 200
+MAX_STEPS = 50
 
 
 # Avoid some range
