@@ -2063,7 +2063,8 @@ class VLMNavAgent(Agent):
                     print(
                         f"  {view_name}[{i}]: "
                         f"r = {r:.3f} m, "
-                        f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}Â°)"
+                        f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}°)"
+
                     )
 
 
@@ -2100,7 +2101,8 @@ class VLMNavAgent(Agent):
             for i, (r, theta) in enumerate(a_final):
                 print(
                     f"  a_final[{i}]: r = {r:.3f} m, "
-                    f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}Â°)"
+                    f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}°)"
+
                 )
 
 
@@ -2190,7 +2192,7 @@ class VLMNavAgent(Agent):
             }
 
         # Build true multi-view observations by *actually* rotating the agent
-        # Â±multi_view_offset_deg and re-rendering, then fusing.
+        # multi_view_offset_deg and re-rendering, then fusing.
         try:
             multi_view_images = self._capture_multi_view_triplet(obs)
             images.update(multi_view_images)
@@ -2317,7 +2319,6 @@ class VLMNavAgent(Agent):
 
         min_angle = self.cfg['hard_spacing']
 
-        # print(f"min angle: {np.rad2deg(min_angle):.10f}Â°")
 
 
 
@@ -2362,13 +2363,6 @@ class VLMNavAgent(Agent):
         out = []
         filter_thresh = 0.75  
         filtered = list(filter(lambda x: x[0] > filter_thresh, arrowData))
-
-        ###################################################################################
-        # print("Filtered actions (r > {:.2f}):".format(filter_thresh))
-        # for r, theta, is_unexplored in filtered:
-        #     print(f"  Î¸: {np.rad2deg(theta):.2f}Â°, r: {r:.2f}, unexplored: {is_unexplored}")
-        ###################################################################################
-
         filtered.sort(key=lambda x: x[1])
 
 
@@ -2419,10 +2413,6 @@ class VLMNavAgent(Agent):
                         out.append([min(f[i][0] * observe_frac, clip_mag), f[i][1], f[i][2]])
                         thetas.add(f[i][1])
 
-
-                # print("Thetas after forward/backward spacing:")
-                # for t in sorted(thetas):
-                #     print(f"  Î¸ = {np.rad2deg(t):.2f}Â°")
 
 
 
@@ -3577,7 +3567,6 @@ class ObjectNavAgent(VLMNavAgent):
             angle_deg_relative = np.degrees(theta_i)
             angle_deg_global = (angle_deg_relative + yaw_deg) % 360
             global_angles.append(angle_deg_global)
-            # print(f"  Action {idx + 1}: Î¸ = {angle_deg_relative:.1f}Â° (relative), {angle_deg_global:.1f}Â° (global)")
 
 
 
