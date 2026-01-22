@@ -3303,14 +3303,31 @@ class ObjectNavAgent(VLMNavAgent):
             pivot_prompt = f"NAVIGATE TO THE NEAREST {goal.upperstopping_prompt()} and get as close to it as possible. Use your prior knowledge about where items are typically located within a home. "
             return pivot_prompt
         if prompt_type == 'action':
-            
-            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
+            # num_actions is the TOTAL number of actions, including Action 0 (REWIND)
+            # So valid action keys are 0, 1, ..., num_actions-1
+            assert num_actions >= 1, "There must be at least Action 0 (REWIND)."
+
+            if num_actions == 1:
+                ordering_text = (
+                    "The 'confident_score' list must contain exactly 1 value, "
+                    "corresponding to Action 0 (REWIND)."
+                )
+            else:
+                ordering_text = (
+                    f"The 'confident_score' list must contain exactly {num_actions} values. "
+                    "The first value is for Action 0 (REWIND), the second value is for Action 1, "
+                    "and so on, up to the last value for "
+                    f"Action {num_actions-1}."
+                )
 
             action_prompt = (
                 f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
+                f"The image is a fusion of three views from one position: "
+                f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
+                f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to REWIND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "
@@ -3320,35 +3337,11 @@ class ObjectNavAgent(VLMNavAgent):
                 f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
                 f"Do NOT normalize or force the scores to sum to 1. "
                 f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-                f"{'If Action 0 (REWIND) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-
-            )   
-
+                f"{ordering_text}"
+            )
 
 
 
-
-            # action_prompt = (
-            #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
-            #     f"Use your prior knowledge about where items are typically located within a home. "
-            #     f"There are {num_actions} actions that you can choose from. "
-            #     f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-            #     f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
-            #     f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
-            #     f"Second, tell me which general direction you should go in. "
-            #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
-            #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-            #     f"'action' must be an integer not a string. "
-            #     f"Generate exactly {num_actions} scores, one for each action shown. "
-            #     f"Each s_i is an independent confidence value in [0, 1] for action i. "
-            #     f"Higher scores mean the action is more likely to bring you closer to the {goal.upper()} or otherwise more promising. "
-            #     f"Lower scores mean the action is less likely to help reach the goal, blocked, or less useful. "
-            #     f"Do NOT normalize or force the scores to sum to 1. "
-            #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            #     f"If two actions are visually/geometrically similar (e.g., small angle difference or targeting the same opening/corridor), "
-            #     f"their scores should be close (e.g., difference ≤ 0.10)."
-            # )
-            
             return action_prompt
 
         raise ValueError('Prompt type must be stopping, pivot, no_project, or action')
