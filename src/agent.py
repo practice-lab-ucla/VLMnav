@@ -3364,19 +3364,19 @@ class ObjectNavAgent(VLMNavAgent):
             pivot_prompt = f"NAVIGATE TO THE NEAREST {goal.upperstopping_prompt()} and get as close to it as possible. Use your prior knowledge about where items are typically located within a home. "
             return pivot_prompt
         if prompt_type == 'action':
-            # num_actions is the TOTAL number of actions, including Action 0 (REWIND)
+            # num_actions is the TOTAL number of actions, including Action 0 (TURN AROUND)
             # So valid action keys are 0, 1, ..., num_actions-1
-            assert num_actions >= 1, "There must be at least Action 0 (REWIND)."
+            assert num_actions >= 1, "There must be at least Action 0 (TURN AROUND)."
 
             if num_actions == 1:
                 ordering_text = (
                     "The 'confident_score' list must contain exactly 1 value, "
-                    "corresponding to Action 0 (REWIND)."
+                    "corresponding to Action 0 (TURN AROUND)."
                 )
             else:
                 ordering_text = (
                     f"The 'confident_score' list must contain exactly {num_actions} values. "
-                    "The first value is for Action 0 (REWIND), the second value is for Action 1, "
+                    "The first value is for Action 0 (TURN AROUND), the second value is for Action 1, "
                     "and so on, up to the last value for "
                     f"Action {num_actions-1}."
                 )
@@ -3386,7 +3386,7 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to REWIND or DONT SEE ANY GOOD ACTIONS. '}"
+                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "
                 f"Lastly, explain which action achieves that best and return it as JSON in the format: "
