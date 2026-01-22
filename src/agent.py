@@ -3227,7 +3227,7 @@ class VLMNavAgent(Agent):
             cv2.circle(rgb_image, circle_center, circle_radius, RED, math.ceil(2 * scale_factor))
             text_position = (circle_center[0] - text_width // 2, circle_center[1] + text_height // 2)
             cv2.putText(rgb_image, text, text_position, font, text_size, text_color, text_thickness)
-            cv2.putText(rgb_image, 'REWIND', (text_position[0] // 2, text_position[1] + math.ceil(80 * scale_factor)), font, text_size * 0.75, RED, text_thickness)
+            cv2.putText(rgb_image, 'TURN AROUND', (text_position[0] // 2, text_position[1] + math.ceil(80 * scale_factor)), font, text_size * 0.75, RED, text_thickness)
 
         return projected
 
@@ -3720,19 +3720,19 @@ class ObjectNavAgent(VLMNavAgent):
             pivot_prompt = f"NAVIGATE TO THE NEAREST {goal.upperstopping_prompt()} and get as close to it as possible. Use your prior knowledge about where items are typically located within a home. "
             return pivot_prompt
         if prompt_type == 'action':
-            # num_actions is the TOTAL number of actions, including Action 0 (REWIND)
+            # num_actions is the TOTAL number of actions, including Action 0 (TURN AROUND)
             # So valid action keys are 0, 1, ..., num_actions-1
-            assert num_actions >= 1, "There must be at least Action 0 (REWIND)."
+            assert num_actions >= 1, "There must be at least Action 0 (TURN AROUND)."
 
             if num_actions == 1:
                 ordering_text = (
                     "The 'confident_score' list must contain exactly 1 value, "
-                    "corresponding to Action 0 (REWIND)."
+                    "corresponding to Action 0 (TURN AROUND)."
                 )
             else:
                 ordering_text = (
                     f"The 'confident_score' list must contain exactly {num_actions} values. "
-                    "The first value is for Action 0 (REWIND), the second value is for Action 1, "
+                    "The first value is for Action 0 (TURN AROUND), the second value is for Action 1, "
                     "and so on, up to the last value for "
                     f"Action {num_actions-1}."
                 )
@@ -3745,7 +3745,7 @@ class ObjectNavAgent(VLMNavAgent):
                 f"The image is a fusion of three views from one position: "
                 f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
                 f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
-                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to REWIND or DONT SEE ANY GOOD ACTIONS. '}"
+                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "
                 f"Lastly, explain which action achieves that best and return it as JSON in the format: "
