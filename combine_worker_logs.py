@@ -24,7 +24,8 @@ OUT_FIELDS = [
     "distance_to_g",
     "dis_true",
     "real_true",
-    "bfs_min"
+    "bfs_min",
+    "error",
 ]
 
 
