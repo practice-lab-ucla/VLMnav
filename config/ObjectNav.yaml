@@ -26,7 +26,7 @@ agent_cfg:
 
 
   # Calibrate using VLM. If this is higher, less result will be clipped
-  # max_action_dist_calibration: 1.7
+
   max_action_dist_calibration: 2.5
 
   max_action_dist: 1.7
@@ -40,7 +40,7 @@ agent_cfg:
 
 
   stopping_action_dist: 1.3 # length of actions after the agent calls stop
-  # stopping_action_dist: 1.7 # 
+
 
   # default_action: 0.2 # how far forward to move if the VLM's chosen action is invalid
   default_action: 0.0
