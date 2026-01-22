@@ -1181,7 +1181,7 @@ class VLMNavAgent(Agent):
                 self.swipping_back = False
 
                 chosen_action_image = obs['color_sensor'].copy()
-                metadata['a_final'] = []  # ðŸ› ï¸ Safely include empty a_final
+                metadata['a_final'] = []  
                 self._project_onto_image([], chosen_action_image, agent_state,
                                         agent_state.sensor_states['color_sensor'])
                 metadata['images']['color_sensor_chosen'] = chosen_action_image
@@ -2651,7 +2651,7 @@ class VLMNavAgent(Agent):
             num_actions = len(a_final)              # how many actions are actually shown
             turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
 
-            # valid â€œnormalâ€ actions: 1..num_actions (you can still allow 0 separately)
+            # valid action actions: 1..num_actions (you can still allow 0 separately)
             valid_actions = list(range(1, num_actions + 1))
 
             # If the model proposes something out of range, force action 0
