@@ -227,7 +227,7 @@ class VLMNavAgent(Agent):
         self.swipping_back = False
 
 
-
+        self.no_candidate_actions_by_step = {}
 
 
 
@@ -1784,6 +1784,7 @@ class VLMNavAgent(Agent):
         self.parent_by_step = {}
         self.swipping_back = False
 
+        self.no_candidate_actions_by_step = {}
 
 
 
@@ -3485,7 +3486,7 @@ class ObjectNavAgent(VLMNavAgent):
         no_candidate_actions = len(a_final) == 1
 
 
-
+        self.no_candidate_actions_by_step[self.step_ndx] = no_candidate_actions
 
 
         # check if turn around is added into an option
