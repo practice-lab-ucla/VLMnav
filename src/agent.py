@@ -44,23 +44,6 @@ def get_agent_heading_angle(agent_quat):
     return angle_deg % 360
 
 
-def rotate_quat_about_y(quat, delta_degrees: float):
-    """
-    Rotate a habitat_sim quaternion by delta_degrees about the global Y axis.
-    Returns a new habitat_sim quaternion.
-    """
-    quat_xyzw = np.array([quat.x, quat.y, quat.z, quat.w], dtype=np.float32)
-    base_rot = R.from_quat(quat_xyzw)                  # [x, y, z, w]
-    yaw_rot = R.from_euler("y", delta_degrees, degrees=True)
-
-    # Apply yaw in world frame; if left/right end up swapped, flip the signs.
-    new_rot = yaw_rot * base_rot
-
-    new_xyzw = new_rot.as_quat().astype(np.float32)    # [x, y, z, w]
-    return quat_from_coeffs(new_xyzw)
-
-
-
 class Agent:
     def __init__(self, cfg: dict):
         pass
@@ -130,17 +113,16 @@ class VLMNavAgent(Agent):
         self.cfg = cfg
         self.fov = cfg['sensor_cfg']['fov']
 
-        self.multi_view_offset_deg = cfg.get('multi_view_offset_deg')
+
         
 
 
 
         self.simWrapper: SimWrapper = None
-        # self.resolution = (
-        #     1080 // cfg['sensor_cfg']['res_factor'],
-        #     1920 // cfg['sensor_cfg']['res_factor']
-        # )
-        self.resolution = (360, 640)
+        self.resolution = (
+            1080 // cfg['sensor_cfg']['res_factor'],
+            1920 // cfg['sensor_cfg']['res_factor']
+        )
 
 
         self.goal_reached = False 
@@ -227,12 +209,11 @@ class VLMNavAgent(Agent):
         self.swipping_back = False
 
 
-        self.no_candidate_actions_by_step = {}
+
 
 
 
         self.focal_length = calculate_focal_length(self.fov, self.resolution[1])
-        print("fovvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",self.fov)
         self.scale = cfg['map_scale']
         self._initialize_vlms(cfg['vlm_cfg'])       
         self.pivot = PIVOT(self.actionVLM, self.fov, self.resolution, max_action_length=cfg['max_action_dist']) if cfg['pivot'] else None
@@ -359,19 +340,8 @@ class VLMNavAgent(Agent):
 
 
             # Step 2: Refresh observation
-            # obs = self.simWrapper.sim.get_sensor_observations(0)
-            # obs['agent_state'] = agent.get_state()
-
-
-            sim = self.simWrapper.sim
-
-            # 👇 This line makes sure the OpenGL context is current
-            sim.step_world(0.0)
-
-            obs = sim.get_sensor_observations(0)
+            obs = self.simWrapper.sim.get_sensor_observations(0)
             obs['agent_state'] = agent.get_state()
-
-
 
             # ✅ Restore 'goal' if it was present
             if hasattr(self, "last_obs") and "goal" in self.last_obs:
@@ -550,7 +520,19 @@ class VLMNavAgent(Agent):
 
 
         self.teleport_step_flags[self.step_ndx] = self.defer_rewind_to_root
+        # print(f"step is ##########################################################################################{self.step_ndx}")
 
+        # grid_row_col = visualize_topdown_map_with_agent(
+        #     map_path=map_path,
+        #     agent_state=agent_state,
+        #     map_origin=map_origin,
+        #     step_idx=self.step_ndx,
+        #     meters_per_pixel=self.cfg.get('meters_per_pixel', 0.005),
+        #     save_path=f"logs/topdown_step{self.step_ndx}.png",
+        #     show=False,
+        #     agent_grid_history=self.agent_grid_history,
+        #     teleport_step_flags=self.teleport_step_flags  # this includes the current step
+        # )
 
         grid_row_col = visualize_topdown_map_with_agent(
             map_path=map_path,
@@ -571,6 +553,13 @@ class VLMNavAgent(Agent):
         
 
 
+        # print("📘 Agent Grid History:")
+        # for step, (r, c) in sorted(self.agent_grid_history.items()):
+        #     print(f"  Step {step}: Grid cell (row={r}, col={c})")
+
+
+
+
         if self.step_ndx == 0:
             self.init_pos = agent_state.position
 
@@ -580,6 +569,35 @@ class VLMNavAgent(Agent):
 
 
         agent_action, metadata = self._choose_action(obs)
+
+
+
+
+
+
+        # if getattr(self, "terminate_after_local", False):
+        #     # Clear rewind state
+        #     self.tree_action_queue = []
+        #     self.defer_rewind_to_root = False
+        #     self.tree_root_state = None
+        #     self.tree_root_step_ndx = None
+
+        #     # Return STOP and mark failure
+        #     return PolarAction.stop, {
+        #         "step_metadata": {"action_number": -1, "success": 1},
+        #         "logging_data": {"note": "LOCAL_REWIND_EXHAUSTED"},
+        #         "a_final": [],
+        #         "images": {"color_sensor": obs["color_sensor"]}
+        #     }
+        
+
+
+
+        # only before goal / before back-propagation
+
+
+
+
 
 
 
@@ -1912,7 +1930,7 @@ class VLMNavAgent(Agent):
         self.parent_by_step = {}
         self.swipping_back = False
 
-        self.no_candidate_actions_by_step = {}
+
 
 
         ####################################################### initialize a csv file that saves the RRT score ###########################3
@@ -1935,32 +1953,19 @@ class VLMNavAgent(Agent):
         self.actionVLM: VLM = vlm_cls(**cfg['model_kwargs'], system_instruction=system_instruction)
         self.stoppingVLM: VLM = vlm_cls(**cfg['model_kwargs'])
 
-
-
-
     def _run_threads(self, obs: dict, stopping_images: list[np.array], goal):
-        """
-        Runs the preprocessing module and stopping module.
+        """Concurrently runs the stopping thread to determine if the agent should stop, and the preprocessing thread to calculate potential actions."""
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            preprocessing_thread = executor.submit(self._preprocessing_module, obs)
+            stopping_thread = executor.submit(self._stopping_module, stopping_images, goal)
 
-        NOTE: We intentionally **do not** run _preprocessing_module in a
-        background thread, because it calls Habitat's simulator / OpenGL
-        (e.g. via _capture_multi_view_triplet). The GL context lives on
-        the main thread, so those calls must stay on the main thread.
-        """
-
-        # 1) Run preprocessing module on the main thread
-        #    (this builds the multi-view triplet inside `images`)
-        a_final, images = self._preprocessing_module(obs)
-
-        # 2) Choose images for the stopping VLM.
-        #    Prefer the true multi-view triplet if available; otherwise fall back.
-        if 'color_sensor_triplet' in images:
-            stopping_images = [images['color_sensor_triplet']]
+            a_final, images = preprocessing_thread.result()
+            called_stop, stopping_response = stopping_thread.result()
 
 
-        # 3) Run stopping module (no simulator / GL calls here)
-        called_stop, stopping_response = self._stopping_module(stopping_images, goal)
 
+        
+        
         if called_stop:
             logging.info('Model called stop')
             self.stopping_calls.append(self.step_ndx)
@@ -1973,6 +1978,33 @@ class VLMNavAgent(Agent):
                 )
                 images['color_sensor'] = new_image
 
+
+    # #### ensure the final print will not print the default arrow #####
+    #     if called_stop:
+    #         logging.info('Model called stop')
+    #         self.stopping_calls.append(self.step_ndx)
+
+    #         if self.cfg['navigability_mode'] != 'none' and self.cfg['project']:
+    #             new_image = obs['color_sensor'].copy()
+
+    #             # 🚫 Don't draw default arrows if goal is reached
+    #             if not self.goal_reached:
+    #                 a_final = self._project_onto_image(
+    #                     self._get_default_arrows(), new_image, obs['agent_state'],
+    #                     obs['agent_state'].sensor_states['color_sensor']
+    #                 )
+    #             else:
+    #                 a_final = []
+
+    #             images['color_sensor'] = new_image
+
+
+
+        
+
+
+
+
         step_metadata = {
             'action_number': -10,
             'success': 1,
@@ -1982,130 +2014,13 @@ class VLMNavAgent(Agent):
             'called_stopping': called_stop
         }
 
+
+
+
+
         return a_final, images, step_metadata, stopping_response
-
-
-
-
-    def _get_obs_at_yaw_offset(self, base_obs: dict, delta_deg: float) -> dict:
-        """
-        Return a new obs dict for a yaw-rotated agent:
-        - delta_deg = 0 uses the original obs
-        - non-zero rotates the agent by delta_deg, gets new sensor readings,
-            then restores the original state.
-        """
-        # For the center view, just reuse the current obs
-        if abs(delta_deg) < 1e-3:
-            return base_obs.copy()
-
-        # If we can't touch the sim, just return the original obs as a fallback
-        if self.simWrapper is None or not hasattr(self.simWrapper, "sim"):
-            return base_obs.copy()
-
-        sim = self.simWrapper.sim
-        agent = sim.get_agent(0)
-
-        # Save original state
-        orig_state = agent.get_state()
-        orig_pos = np.array(orig_state.position, dtype=np.float32)
-        orig_rot = orig_state.rotation
-
-        # Rotate yaw
-        new_quat = rotate_quat_about_y(orig_rot, delta_deg)
-        self.simWrapper.set_state(pos=orig_pos, quat=new_quat)
-
-        # Get new sensor observations at this yaw
-        sub_obs = sim.get_sensor_observations(0)
-
-        # Build a new obs dict for this view
-        view_obs = base_obs.copy()
-        view_obs['agent_state'] = agent.get_state()
-        view_obs['color_sensor'] = sub_obs['color_sensor']
-
-        # If you have depth, include it too (needed for navigability)
-        if 'depth_sensor' in sub_obs:
-            view_obs['depth_sensor'] = sub_obs['depth_sensor']
-
-        # Restore original state
-        self.simWrapper.set_state(pos=orig_pos, quat=orig_rot)
-
-        return view_obs
-
-
-
-
-
     
-    def _capture_multi_view_triplet(self, obs: dict) -> dict:
-        """
-        Take 3 real observations from the simulator:
-          - center: current heading (already in obs)
-          - left:   yaw -multi_view_offset_deg
-          - right:  yaw +multi_view_offset_deg
 
-        All three use the true camera FOV (69.5° from config).
-        We then horizontally concatenate them: [left | center | right].
-
-        Returns a dict with:
-          - 'color_sensor_center'
-          - 'color_sensor_left'
-          - 'color_sensor_right'
-          - 'color_sensor_triplet'
-        """
-        center_img = obs['color_sensor'].copy()
-        agent_state: habitat_sim.AgentState = obs['agent_state']
-
-        # If we don't have direct simulator access for some reason, fall back
-        # to just tiling the center view 3x.
-        if self.simWrapper is None or not hasattr(self.simWrapper, "sim"):
-            triplet = np.concatenate([center_img, center_img, center_img], axis=1)
-            return {
-                'color_sensor_center': center_img,
-                'color_sensor_left': center_img,
-                'color_sensor_right': center_img,
-                'color_sensor_triplet': triplet,
-            }
-
-        sim = self.simWrapper.sim
-        agent = sim.get_agent(0)
-
-        # Preserve the *true* sim state to restore later
-        orig_state = agent.get_state()
-        orig_pos = np.array(orig_state.position, dtype=np.float32)
-        orig_rot = orig_state.rotation
-
-        def get_view_at_yaw_offset(delta_deg: float) -> np.ndarray:
-            """Temporarily yaw the agent by delta_deg, render, then return image."""
-            new_quat = rotate_quat_about_y(orig_rot, delta_deg)
-            # Use SimWrapper so we go through the same abstraction you use elsewhere
-            self.simWrapper.set_state(pos=orig_pos, quat=new_quat)
-
-            # NOTE: your code elsewhere uses get_sensor_observations(0), so we match that.
-            sub_obs = sim.get_sensor_observations(0)
-            return sub_obs['color_sensor'].copy()
-
-        # Capture left and right views
-        left_img = get_view_at_yaw_offset(+self.multi_view_offset_deg)
-        right_img = get_view_at_yaw_offset(-self.multi_view_offset_deg)
-
-        # Restore the original state (so we don't actually rotate the robot)
-        self.simWrapper.set_state(pos=orig_pos, quat=orig_rot)
-
-        # Make sure all 3 images have the same height before concatenation
-        min_h = min(center_img.shape[0], left_img.shape[0], right_img.shape[0])
-        center_img = center_img[:min_h]
-        left_img = left_img[:min_h]
-        right_img = right_img[:min_h]
-
-        triplet = np.concatenate([left_img, center_img, right_img], axis=1)
-
-        return {
-            'color_sensor_center': center_img,
-            'color_sensor_left': left_img,
-            'color_sensor_right': right_img,
-            'color_sensor_triplet': triplet,
-        }
-   
 
 
 
@@ -2135,199 +2050,35 @@ class VLMNavAgent(Agent):
                 (self.cfg['max_action_dist'], 0.28 * np.pi),
                 (self.cfg['max_action_dist'], 0.36 * np.pi)
             ]
+        else: 
+            a_initial = self._navigability(obs)
+
+            # print(f"debug here ################################### 1",a_initial)
+
+
+            a_final = self._action_proposer(a_initial, agent_state)
+
+
+            # print(f"debug here ################################### 2",a_final)
+        
+        # print("After _action_proposer (a_final):")
+        # for mag, theta in a_final:
+        #     print(f"  θ = {np.rad2deg(theta):.2f}°, r = {mag:.2f}")
+
+
+        a_final_projected = self._projection(a_final, images, agent_state)
+
+
+        # print("After projection (a_final_projected):")
+        # for mag, theta in a_final_projected:
+        #     print(f"  θ = {np.rad2deg(theta):.2f}°, r = {mag:.2f}")
 
 
 
 
-        else:
-            # ---------- PASS 1: navigability + action proposer ----------
-            # Order: CENTER -> LEFT -> RIGHT  (voxel map updated in this order)
-            yaw_offsets = [
-                0.0,                          # center
-                +self.multi_view_offset_deg,  # left
-                -self.multi_view_offset_deg,  # right
-            ]
-            view_names = ["center", "left", "right"]
-
-            a_initial_list = []
-            a_final_list = []
-            view_obs_list = []
-
-            for delta_deg, view_name in zip(yaw_offsets, view_names):
-                # For center, just reuse the original obs to avoid extra sim calls
-                if abs(delta_deg) < 1e-3:
-                    view_obs = obs
-                else:
-                    view_obs = self._get_obs_at_yaw_offset(obs, delta_deg)
-
-                view_agent_state = view_obs['agent_state']
-                delta_rad = np.deg2rad(delta_deg)
-
-                # 1) navigability on this specific view (updates voxel map)
-                #    For left/right, only keep rays that are OUTSIDE the center FOV.
-                restrict_nonoverlap = (view_name != "center")
-                a_initial_view = self._navigability(
-                    view_obs,
-                    delta_rad=delta_rad,
-                    restrict_to_nonoverlap=restrict_nonoverlap,
-                )
-
-                # 2) Run the action proposer on this view's valid FOV.
-                a_final_view = self._action_proposer(
-                    a_initial_view,
-                    view_agent_state,
-                )
-
-                a_initial_list.append(a_initial_view)
-                a_final_list.append(a_final_view)
-                view_obs_list.append(view_obs)
-
-
-
-
-            for view_name, a_final_view in zip(view_names, a_final_list):
-                print(f"\n[DEBUG] proposed actions in {view_name} frame:")
-                for i, (r, theta) in enumerate(a_final_view):
-                    print(
-                        f"  {view_name}[{i}]: "
-                        f"r = {r:.3f} m, "
-                        f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}°)"
-                    )
-
-
-
-
-            # Center is index 0 (yaw_offsets[0] == 0.0)
-            # ---------- Build unified a_final in CENTER frame ----------
-            # Indices in the PASS 1 lists
-            name_to_idx = {"center": 0, "left": 1, "right": 2}
-
-            # Keep center initial set if you need it elsewhere
-            a_initial_center = a_initial_list[name_to_idx["center"]]
-
-            # Combine all 3 views' actions into the CENTER frame.
-            # Order for the final list: LEFT -> CENTER -> RIGHT
-            a_final_center_frame = []
-            for view_name in ["left", "center", "right"]:
-                idx = name_to_idx[view_name]
-                delta_deg = yaw_offsets[idx]
-                delta_rad = np.deg2rad(delta_deg)
-
-                # a_final_list[idx] is in that view's local frame;
-                # convert its angles into the center frame by adding delta_rad.
-                for r, theta in a_final_list[idx]:
-                    a_final_center_frame.append((r, theta - delta_rad))
-
-            a_final = a_final_center_frame
-
-
-
-
-
-            print("\n[DEBUG] unified a_final in center frame (LEFT -> CENTER -> RIGHT):")
-            for i, (r, theta) in enumerate(a_final):
-                print(
-                    f"  a_final[{i}]: r = {r:.3f} m, "
-                    f"theta = {theta:.3f} rad ({np.degrees(theta):.2f}°)"
-                )
-
-
-
-
-
-
-
-
-            # ---------- PASS 2: projection & numbering ----------
-            # Numbering order: LEFT -> CENTER -> RIGHT
-            action_index_offset = 0
-            projected_actions_by_view = {}  # view_name -> { (r, theta) -> action_index }
-
-            for view_name in ["left", "center", "right"]:
-                idx = name_to_idx[view_name]
-                view_obs = view_obs_list[idx]
-                view_agent_state = view_obs['agent_state']
-                a_final_view = a_final_list[idx]
-
-                view_img = view_obs['color_sensor'].copy()
-
-                # left keeps TURN AROUND; center/right drop it
-                include_turnaround = (view_name == "left")
-
-                projected_actions = self._project_onto_image(
-                    a_final_view,
-                    view_img,
-                    view_agent_state,
-                    view_agent_state.sensor_states['color_sensor'],
-                    include_turnaround=include_turnaround,
-                    action_index_offset=action_index_offset,
-                )
-                images[f"color_sensor_{view_name}_projected"] = view_img
-
-                # bump offset so the next view's numbers keep increasing
-                action_index_offset += len(projected_actions)
-
-                # remember which actions actually got projected in this view
-                projected_actions_by_view[view_name] = projected_actions
-
-            # ---------- Stitch [left | center | right] into a projected triplet ----------
-            left_img = images["color_sensor_left_projected"]
-            center_img = images["color_sensor_center_projected"]
-            right_img = images["color_sensor_right_projected"]
-
-            # Match heights just in case
-            min_h = min(left_img.shape[0], center_img.shape[0], right_img.shape[0])
-            left_img = left_img[:min_h]
-            center_img = center_img[:min_h]
-            right_img = right_img[:min_h]
-
-            triplet_projected = np.concatenate([left_img, center_img, right_img], axis=1)
-            images["color_sensor_triplet_projected"] = triplet_projected
-
-            # ---------- Filter unified a_final to ONLY actions that were projected ----------
-            # We keep an action iff it was successfully projected in at least one view.
-
-
-            filtered_a_final_center = []
-            for view_name in ["left", "center", "right"]:
-                idx = name_to_idx[view_name]
-                delta_deg = yaw_offsets[idx]
-                delta_rad = np.deg2rad(delta_deg)
-
-                projected_actions = projected_actions_by_view.get(view_name, {})
-                for (r_view, theta_view) in projected_actions.keys():
-                    # convert from this view's local frame back into the center frame
-                    theta_center = theta_view - delta_rad
-                    filtered_a_final_center.append((r_view, theta_center))
-
-            # Only overwrite if something was actually projected; otherwise fall back
-            if filtered_a_final_center:
-                a_final = filtered_a_final_center
-
-
-
-        if self.cfg['navigability_mode'] == 'none':
-            a_final_projected = self._projection(a_final, images, agent_state)
-        else:
-            if "color_sensor_center_projected" in images:
-                images["color_sensor"] = images["color_sensor_center_projected"]
-
-            a_final_projected = {
-                (r, theta): idx + 1
-                for idx, (r, theta) in enumerate(a_final)
-            }
-
-        # Build true multi-view observations by *actually* rotating the agent
-        # ±multi_view_offset_deg and re-rendering, then fusing.
-        try:
-            multi_view_images = self._capture_multi_view_triplet(obs)
-            images.update(multi_view_images)
-        except Exception as e:
-            logging.error(f"Failed to build multi-view triplet: {e}")
 
         images['voxel_map'] = self._generate_voxel(a_final_projected, agent_state=agent_state)
         return a_final_projected, images
-
 
     def _stopping_module(self, stopping_images: list[np.array], goal):
         """Determines if the agent should stop and prints confidence scores."""
@@ -2353,21 +2104,18 @@ class VLMNavAgent(Agent):
     
 
 
-    def _navigability(
-        self,
-        obs: dict,
-        delta_rad: float = 0.0,
-        restrict_to_nonoverlap: bool = False,
-    ):
-        """
-        Generates the set of navigability actions and updates the voxel map accordingly.
 
-        If restrict_to_nonoverlap is True, this observation is a side view (left/right)
-        and we only keep rays whose direction in the *center* camera frame lies
-        OUTSIDE the center camera FOV. The mapping from this view to the center
-        frame is given by delta_rad.
-        """
+
+    def _navigability(self, obs: dict):
+        """Generates the set of navigability actions and updates the voxel map accordingly."""
         agent_state: habitat_sim.AgentState = obs['agent_state']
+
+
+
+
+
+
+
 
         sensor_state = agent_state.sensor_states['color_sensor']
         rgb_image = obs['color_sensor']
@@ -2381,61 +2129,26 @@ class VLMNavAgent(Agent):
             rgb_image, depth_image, agent_state, sensor_state
         )
 
-        # sensor_range = np.deg2rad(self.fov / 2) * 1.5
-        sensor_range = np.deg2rad(self.fov / 2) * 1.0
-        center_half_fov_rad = np.deg2rad(self.fov / 2.0)
+        sensor_range =  np.deg2rad(self.fov / 2) * 1.5
 
         all_thetas = np.linspace(-sensor_range, sensor_range, self.cfg['num_theta'])
         start = agent_frame_to_image_coords(
-            [0, 0, 0],
-            agent_state,
-            sensor_state,
-            resolution=self.resolution,
-            focal_length=self.focal_length,
+            [0, 0, 0], agent_state, sensor_state,
+            resolution=self.resolution, focal_length=self.focal_length
         )
 
         a_initial = []
         for theta_i in all_thetas:
-            # For side views, drop rays whose direction (expressed in the
-            # *center* frame) falls inside the center FOV.
-            if restrict_to_nonoverlap and abs(delta_rad) > 1e-3:
-                # Convert this view's local theta into the center-camera frame.
-                theta_center = theta_i - delta_rad
-
-
-
-                if -center_half_fov_rad <= theta_center <= center_half_fov_rad:
-                # if -sensor_range/2 <= theta_center <= sensor_range/2:
-
-
-
-
-
-
-                    # This ray overlaps the center FOV → skip it.
-                    continue
-
-            r_i, theta_i = self._get_radial_distance(
-                start,
-                theta_i,
-                navigability_mask,
-                agent_state,
-                sensor_state,
-                depth_image,
-            )
+            r_i, theta_i = self._get_radial_distance(start, theta_i, navigability_mask, agent_state, sensor_state, depth_image)
             if r_i is not None:
                 self._update_voxel(
-                    r_i,
-                    theta_i,
-                    agent_state,
-                    clip_dist=self.cfg['max_action_dist'],
-                    clip_frac=self.e_i_scaling,
+                    r_i, theta_i, agent_state,
+                    clip_dist=self.cfg['max_action_dist'], clip_frac=self.e_i_scaling
                 )
                 a_initial.append((r_i, theta_i))
 
         return a_initial
-
-
+    
 
 
     def _action_proposer(self, a_initial: list, agent_state: habitat_sim.AgentState):
@@ -2498,21 +2211,6 @@ class VLMNavAgent(Agent):
         ###################################################################################
 
         filtered.sort(key=lambda x: x[1])
-
-
-
-
-
-
-
-        # If there are no candidate rays, or every candidate ray is already
-        # classified as explored, then this view cannot propose any new
-        # actions. We signal this to the caller by returning an empty list;
-        # higher-level logic will fall back to action 0 (turn around).
-        has_unexplored = any(is_unexplored for _, _, is_unexplored in arrowData)
-        if not arrowData or not has_unexplored:
-
-            return []
 
 
 
@@ -2689,59 +2387,6 @@ class VLMNavAgent(Agent):
 
 
         return a_final_projected
-    
-
-
-
-
-    def _fake_vlm_turnaround(self, goal, a_final: list, images: dict, step_metadata: dict, turnaround_available: bool):
-        """Fallback "fake VLM" used when no actions can be proposed.
-
-        This is triggered when the preprocessing / multi-view triplet produces
-        an empty candidate set of actions. In that case there is nothing for
-        the real VLM to rank, so we deterministically select action 0
-        ("turn around"), which is always available in the environment.
-        """
-
-        # We skip constructing a language prompt and skip the model call.
-        # Instead we directly set the metadata as if the model had answered
-        # with action 0 and a single confident action.
-        step_metadata['action_number'] = 0
-        step_metadata.setdefault('success', 1)
-        step_metadata['score'] = 1.0              # max normalized score
-        step_metadata['confident_score'] = [1.0]  # single action with prob 1
-
-        # Record a minimal log entry so that tree/backtracking code still
-        # has a consistent per-step record, even though no real VLM scores exist.
-        step_number = self.step_ndx
-        conf_scores = None   # keep this None if you don't care about per-action log entries
-        self._record_log_entry(step_number, a_final, conf_scores, turnaround_available)
-
-        logging_data = {
-            'ACTION_NUMBER': step_metadata['action_number'],
-            'CONFIDENCE_SCORE': step_metadata['score'],
-            'CONFIDENT_SCORE': step_metadata['confident_score'],
-            'PROMPT': '(fake VLM: no actions available; chose action 0 / turn around)',
-            'RESPONSE': '{"action": 0, "score": 1.0, "confident_score": [1.0]}',
-        }
-
-        return step_metadata, logging_data, logging_data['RESPONSE']
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         
 
     def _prompting(self, goal, a_final: list, images: dict, step_metadata: dict):
@@ -2760,65 +2405,25 @@ class VLMNavAgent(Agent):
         prompt_type = 'action' if self.cfg['project'] else 'no_project'
         action_prompt = self._construct_prompt(goal, prompt_type, num_actions=len(a_final))
 
-
-
-        # prompt_images = [images['color_sensor']]
-        # if 'goal_image' in images:
-        #     prompt_images.append(images['goal_image'])
-
-
-        prompt_images = [images['color_sensor_triplet']]
-
+        prompt_images = [images['color_sensor']]
         if 'goal_image' in images:
             prompt_images.append(images['goal_image'])
 
-
-
-
-
-
-
-
-
-
-
         response = self.actionVLM.call_chat(self.cfg['context_history'], prompt_images, action_prompt)
-
 
         logging_data = {}
         try:
             response_dict = self._eval_response(response)
-            raw_action = int(response_dict['action'])
-
-            # ----------------- NEW: enforce valid action range -----------------
-            num_actions = len(a_final)              # how many actions are actually shown
-            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
-
-            # valid “normal” actions: 1..num_actions (you can still allow 0 separately)
-            valid_actions = list(range(1, num_actions + 1))
-
-            # If the model proposes something out of range, force action 0
-            if (raw_action not in valid_actions) and (raw_action != 0):
-                logging.warning(
-                    f"VLM proposed invalid action {raw_action}; "
-                    f"valid actions: {valid_actions} (plus 0 for turnaround). "
-                    f"Falling back to action 0."
-                )
-                sanitized_action = 0
-            else:
-                sanitized_action = raw_action
-
-            step_metadata['action_number'] = sanitized_action
-            # ----------------- END NEW BLOCK -----------------
+            step_metadata['action_number'] = int(response_dict['action'])
 
             self._link_parent_for_next_step(self.step_ndx)
 
             print("trigger 222222222222222222222222222222222222222222222222222222222222")
 
+
             if self.step_ndx not in self.tried_actions_by_step:
                 self.tried_actions_by_step[self.step_ndx] = set()
             self.tried_actions_by_step[self.step_ndx].add(step_metadata['action_number'])
-
 
 
 
@@ -3190,10 +2795,9 @@ class VLMNavAgent(Agent):
 
 
 
-    def _save_goal_image_once(self, obs: dict, images: dict = None, out_dir: str = "logs/goal_image") -> None:
+    def _save_goal_image_once(self, obs: dict, out_dir: str = "logs/goal_image") -> None:
         """
         Save the current RGB observation once (first time goal is reached).
-        By default, saves the multi-view triplet [left | center | right] if available.
         Filename: <episode_name>_<goalname>.png (auto-suffix _2, _3 if exists)
         """
         if getattr(self, "_saved_goal_image", False):
@@ -3223,28 +2827,18 @@ class VLMNavAgent(Agent):
             out_path = os.path.join(out_dir, f"{base}_{k}.png")
             k += 1
 
-        # ---- pick which image to save ----
-        img = None
+        if "color_sensor" not in obs:
+            print("[WARN] no color_sensor in obs, cannot save goal image")
+            return
 
-        # Prefer the true multi-view triplet if we have it
-        if images is not None:
-            if "color_sensor_triplet" in images:
-                img = images["color_sensor_triplet"]
-            elif "color_sensor_triplet_projected" in images:
-                img = images["color_sensor_triplet_projected"]
-            elif "color_sensor" in images:
-                img = images["color_sensor"]
-
-
-
+        img = obs["color_sensor"]
         if getattr(img, "dtype", None) != "uint8":
             img = img.astype("uint8")
 
         Image.fromarray(img).save(out_path)
-        print("✅ saved goal image (triplet if available):", out_path)
+        print("✅ saved goal image:", out_path)
 
         self._saved_goal_image = True
-
 
 
 
@@ -3294,20 +2888,10 @@ class VLMNavAgent(Agent):
             return end_px
         return None
 
-    def _project_onto_image(
-        self,
-        a_final: list,
-        rgb_image: np.ndarray,
-        agent_state: habitat_sim.AgentState,
-        sensor_state: habitat_sim.SixDOFPose,
-        chosen_action: int = None,
-        include_turnaround: bool = True,
-        action_index_offset: int = 0,
-    ):
+    def _project_onto_image(self, a_final: list, rgb_image: np.ndarray, agent_state: habitat_sim.AgentState, sensor_state: habitat_sim.SixDOFPose, chosen_action: int=None):
         """
         Projects a set of actions onto a single image. Keeps track of action-to-number mapping.
         """
-        # scale_factor = rgb_image.shape[0] / 480    
         scale_factor = rgb_image.shape[0] / 1080
         font = cv2.FONT_HERSHEY_SIMPLEX
         text_color = BLACK
@@ -3340,7 +2924,7 @@ class VLMNavAgent(Agent):
 
             end_px = self._can_project(r_i, theta_i, agent_state, sensor_state)
             if end_px is not None:
-                action_name = action_index_offset + len(projected) + 1
+                action_name = len(projected) + 1
                 projected[(r_i, theta_i)] = action_name
 
                 cv2.arrowedLine(rgb_image, tuple(start_px), tuple(end_px), RED, math.ceil(5 * scale_factor), tipLength=0.0)
@@ -3357,11 +2941,7 @@ class VLMNavAgent(Agent):
                 text_position = (circle_center[0] - text_width // 2, circle_center[1] + text_height // 2)
                 cv2.putText(rgb_image, text, text_position, font, text_size, text_color, text_thickness)
 
-        if include_turnaround and (
-            (self.step_ndx - self.turned) >= self.cfg['turn_around_cooldown']
-            or self.step_ndx == self.turned
-            or (chosen_action == 0)
-        ):
+        if (self.step_ndx - self.turned) >= self.cfg['turn_around_cooldown'] or self.step_ndx == self.turned or (chosen_action == 0):
             text = '0'
             text_size = 3.1 * scale_factor
             text_thickness = math.ceil(3 * scale_factor)
@@ -3568,6 +3148,102 @@ class VLMNavAgent(Agent):
 
 
 
+class GOATAgent(VLMNavAgent):
+ 
+    def _choose_action(self, obs: dict):
+        agent_state = obs['agent_state']
+        goal = obs['goal']
+
+        if goal['mode'] == 'image':
+            stopping_images = [obs['color_sensor'], goal['goal_image']]
+        else:
+            stopping_images = [obs['color_sensor']]
+
+        a_final, images, step_metadata, stopping_response = self._run_threads(obs, stopping_images, goal)
+        if goal['mode'] == 'image':
+            images['goal_image'] = goal['goal_image']
+
+        step_metadata.update({
+            'goal': goal['name'],
+            'goal_mode': goal['mode']
+        })
+
+        # If model calls stop two times in a row, we return the stop action and terminate the episode
+        if len(self.stopping_calls) >= 2 and self.stopping_calls[-2] == self.step_ndx - 1:
+            step_metadata['action_number'] = -1
+            agent_action = PolarAction.stop
+            logging_data = {}
+        else:
+            if self.pivot is not None:
+                pivot_instruction = self._construct_prompt(goal, 'pivot')
+                agent_action, pivot_images = self.pivot.run(
+                    obs['color_sensor'], pivot_instruction,
+                    agent_state, agent_state.sensor_states['color_sensor'],
+                    goal_image=goal['goal_image'] if goal['mode'] == 'image' else None
+                )
+                images.update(pivot_images)
+                logging_data = {}
+                step_metadata['action_number'] = -100
+            else:
+                step_metadata, logging_data, _ = self._prompting(goal, a_final, images, step_metadata)
+                agent_action = self._action_number_to_polar(step_metadata['action_number'], list(a_final))
+
+        logging_data['STOPPING RESPONSE'] = stopping_response
+        metadata = {
+            'step_metadata': step_metadata,
+            'logging_data': logging_data,
+            'a_final': a_final,
+            'images': images
+        }
+        return agent_action, metadata
+    
+    def _construct_prompt(self, goal: dict, prompt_type: str, num_actions=0):
+        """Constructs the prompt, depending on the goal modality. """
+        if goal['mode'] == 'object':
+            task = f'Navigate to the nearest {goal["name"]}'
+            first_instruction = f'Find the nearest {goal["name"]} and navigate as close as you can to it. '
+        if goal['mode'] == 'description':
+            first_instruction = f"Find and navigate to the {goal['lang_desc']}. Navigate as close as you can to it. "
+            task = first_instruction
+        if goal['mode'] == 'image':
+            task = f'Navigate to the specific {goal["name"]} shown in the image labeled GOAL IMAGE. Pay close attention to the details, and note you may see the object from a different angle than in the goal image. Navigate as close as you can to it '
+            first_instruction = f"Observe the image labeled GOAL IMAGE. Find this specific {goal['name']} shown in the image and navigate as close as you can to it. "
+
+        if prompt_type == 'stopping':        
+            stopping_prompt = (f"The agent has the following navigation task: \n{task}\n. The agent has sent you an image taken from its current location{' as well as the goal image. ' if goal['mode'] == 'image' else '. '} "
+                                f'Your job is to determine whether the agent is close to the specified {goal["name"].upper()}'
+                                f"First, tell me what you see in the image, and tell me if there is a {goal['name']} that matches the description. Then, return 1 if the agent is close to the {goal['name']}, and 0 if it isn't. Format your answer in the json {{'done': <1 or 0>}}")
+            return stopping_prompt
+
+        if prompt_type == 'pivot':
+            return f'{first_instruction} Use your prior knowledge about where items are typically located within a home. '
+        
+        if prompt_type == 'no_project':
+            baseline_prompt = (f"TASK: {first_instruction} use your prior knowledge about where items are typically located within a home. "
+                        "You have four possible actions: {0: Turn completely around, 1: Turn left, 2: Move straight ahead, 3: Turn right}. "
+                        f"First, tell me what you see, and if you have any leads on finding the {goal['name']}. Second, tell me which general direction you should go in. "
+                        f"Lastly, explain which action acheives that best, and return it as {{'action': <action_key>}}. Note you CANNOT GO THROUGH CLOSED DOORS, and you DO NOT NEED TO GO UP OR DOWN STAIRS"             
+            )
+            return baseline_prompt
+        
+        if prompt_type == 'action':
+            action_prompt = (f"TASK: {first_instruction} use your prior knowledge about where items are typically located within a home. "
+            f"There are {num_actions-1} red arrow(s) superimposed onto your observation, which represent potential actions. " 
+            f"These are labeled with a number in a white circle, which represent the location you would move to if you took that action. {'NOTE: choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS.' if self.step_ndx - self.turned >= self.cfg['turn_around_cooldown'] else ''}"
+            f"First, tell me what you see, and if you have any leads on finding the {goal['name']}. Second, tell me which general direction you should go in. "
+            f"Lastly, explain which action is the best and return it as {{'action': <action_key>}}. Note you CANNOT GO THROUGH CLOSED DOORS, and you DO NOT NEED TO GO UP OR DOWN STAIRS"
+            )
+            return action_prompt
+
+        raise ValueError('Prompt type must be stopping, pivot, no_project, or action')
+
+    def reset_goal(self):
+        """Called after every subtask of GOAT. Notably does not reset the voxel map, only resets all areas to be unexplored"""
+        self.stopping_calls = [self.step_ndx-2]
+        self.explored_map = np.zeros_like(self.explored_map)
+        self.turned = self.step_ndx - self.cfg['turn_around_cooldown']
+
+
 class ObjectNavAgent(VLMNavAgent):
 
 
@@ -3612,31 +3288,12 @@ class ObjectNavAgent(VLMNavAgent):
         if isinstance(a_final, dict):
             a_final = list(a_final.keys())
 
-
-
-
-        # Remember whether preprocessing produced any candidate actions.
-        no_candidate_actions = len(a_final) == 1
-
-
-        self.no_candidate_actions_by_step[self.step_ndx] = no_candidate_actions
-
-
-
-
-
         # check if turn around is added into an option
         turnaround_available = (self.step_ndx - self.turned) >= self.cfg['turn_around_cooldown']
         turn_around_action = (0.75, np.pi)
         if turnaround_available and turn_around_action not in a_final:
             
             a_final.append(turn_around_action)
-
-
-
-
-
-
 
 
 ############################################################################################# NAV agent####################################################3
@@ -3653,7 +3310,7 @@ class ObjectNavAgent(VLMNavAgent):
                 self.first_reach = True
 
                 if self.first_reach == True:
-                    self._save_goal_image_once(obs, images)
+                    self._save_goal_image_once(obs)
                     
 
 
@@ -3711,6 +3368,30 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
+            # # ⛔ Only stop if backtrack failed
+            # print("🛑 No backtrack options — stopping agent.")
+            # step_metadata['action_number'] = -1
+            # agent_action = PolarAction.stop
+
+
+            # logging_data = {}
+
+
+            # print("stooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooop")
+
+            # logging_data['STOPPING RESPONSE'] = stopping_response
+            # metadata = {
+            #     'step_metadata': step_metadata,
+            #     'logging_data': logging_data,
+            #     'a_final': a_final,
+            #     'images': images
+
+            # }
+
+
+            # return agent_action, metadata
+
+
 
 
         global_angles = []
@@ -3732,15 +3413,10 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
+
+
         else:
-            if no_candidate_actions:
-                # No actions were proposed from the multi-view triplet; skip the real VLM
-                # and use the fake VLM that always chooses action 0 (turn around).
-                step_metadata, logging_data, _ = self._fake_vlm_turnaround(
-                    goal, a_final, images, step_metadata, turnaround_available
-                )
-                agent_action = self._action_number_to_polar(step_metadata['action_number'], list(a_final))
-            elif self.pivot is not None:
+            if self.pivot is not None:
                 pivot_instruction = self._construct_prompt(goal, 'pivot')
                 agent_action, pivot_images = self.pivot.run(
                     obs['color_sensor'], pivot_instruction,
@@ -3752,7 +3428,6 @@ class ObjectNavAgent(VLMNavAgent):
             else:
                 step_metadata, logging_data, _ = self._prompting(goal, a_final, images, step_metadata)
                 agent_action = self._action_number_to_polar(step_metadata['action_number'], list(a_final))
-
 
         logging_data['STOPPING RESPONSE'] = stopping_response
         metadata = {
@@ -3822,12 +3497,52 @@ class ObjectNavAgent(VLMNavAgent):
         if prompt_type == 'stopping':
 
 
+            # stopping_prompt = (
+            #                 f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image taken from its current location. "
+            #                 f"Your job is to determine whether the agent is VERY CLOSE to a {goal}. Note that a chair is NOT a sofa, which is NOT a bed. "
+            #                 f"First, describe what you see in the image and whether a {goal} is present. "
+            #                 f"Second, you have two actions to choose from. First action: return 1 if the agent is VERY CLOSE to the {goal}. Second action: return 0 if it is far away, does not exist, or you are not sure. "
+            #                 f"Third, based on what is visible in the image, provide a score between 0.0 and 1.0 representing how much this scene is worth exploring further. "
+            #                 f"This is called the global semantic score. A score close to 1.0 means the scene appears promising and informative, suggesting that moving forward or scanning the area may help locate the {goal}. "
+            #                 f"A score close to 0.0 means the scene appears uninformative, irrelevant, or unlikely to contain useful paths or cues. "
+            #                 f"Format your response in JSON format:\n"
+            #                 f"{{'done': <1 or 0>, 'global_semantic_score': <float between 0.0 and 1.0>}}"
+            #             )
+            
 
 
             # stopping_prompt = (
             #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-            #                     f"The image is a fusion of three views from one position at different angles."
-            #                     f"Your job is to decide if the agent is VERY CLOSE (less than 2 meters) from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
+            #                     f"Your job is to decide if the agent is NOT FAR from a {goal}, based ONLY on what is VISIBLE in the image."
+            #                     f"Important: a chair is NOT a sofa, and a sofa is NOT a bed. Do NOT infer the {goal} from the room type or context.\n"
+
+            #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
+
+            #                     f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
+            #                     f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
+            #                     f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
+
+            #                     f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
+            #                     f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
+            #                     f"High scores mean the scene has open, traversable, informative paths."
+            #                     f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
+
+            #                     f"Important rules for global_semantic_score:"
+            #                     f"- Do NOT increase the score just because the {goal} is visible."
+            #                     f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
+
+            #                     f"Examples:"
+            #                     f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+            #                     f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+            #                     f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
+            #                     f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+            #                     f"After Step 3, immediately output this JSON line:"
+            #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
+            # )
+
+            # stopping_prompt = (
+            #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
+            #                     f"Your job is to decide if the agent is NOT FAR from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
             #                     f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
             #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
@@ -3852,43 +3567,36 @@ class ObjectNavAgent(VLMNavAgent):
             #                     f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
             #                     f"After Step 3, immediately output this JSON line:"
             #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
-
             # )
 
             stopping_prompt = (
-                    f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-                    f"The image is a fusion of three views from one position: "
-                    f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
-                    f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
-                    f"Your job is to decide if the agent is VERY CLOSE from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
-                    f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
+                                f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
+                                f"Your job is to decide if the agent is VERY CLOSE (less than 2 meters) from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
+                                f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
-                    f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
+                                f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
 
-                    f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
-                    f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
-                    f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
+                                f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
+                                f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
+                                f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
 
-                    f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
-                    f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
-                    f"High scores mean the scene has open, traversable, informative paths."
-                    f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
+                                f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
+                                f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
+                                f"High scores mean the scene has open, traversable, informative paths."
+                                f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
 
-                    f"Important rules for global_semantic_score:"
-                    f"- Do NOT increase the score just because the {goal} is visible."
-                    f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
+                                f"Important rules for global_semantic_score:"
+                                f"- Do NOT increase the score just because the {goal} is visible."
+                                f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
 
-                    f"Examples:"
-                    f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-                    f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
-                    f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
-                    f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-                    f"After Step 3, immediately output this JSON line:"
-                    f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
-
+                                f"Examples:"
+                                f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+                                f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+                                f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
+                                f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+                                f"After Step 3, immediately output this JSON line:"
+                                f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
             )
-
-
 
 
 
@@ -3909,43 +3617,7 @@ class ObjectNavAgent(VLMNavAgent):
             pivot_prompt = f"NAVIGATE TO THE NEAREST {goal.upperstopping_prompt()} and get as close to it as possible. Use your prior knowledge about where items are typically located within a home. "
             return pivot_prompt
         
-
-
-
-
-
-
-
-
-
-        if prompt_type == 'action':
-            
-            turnaround_available = self.step_ndx - self.turned >= self.cfg['turn_around_cooldown']
-
-
-
-            action_prompt = (
-                f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
-                f"Use your prior knowledge about where items are typically located within a home. "
-                f"There are {num_actions} actions that you can choose from. "
-                f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-                f"The image is a fusion of three views from one position: "
-                f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
-                f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
-                f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to REWIND or DONT SEE ANY GOOD ACTIONS. '}"
-                f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
-                f"Second, tell me which general direction you should go in. "
-                f"Lastly, explain which action achieves that best and return it as JSON in the format: "
-                f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-                f"The 'confident_score' list represents probabilities for each action "
-                f"'action' must be an integer not a string and an independent confidence value in [0, 1]  "
-                f"Do NOT normalize or force the scores to sum to 1. "
-                f"You must generate exactly {num_actions} confidence scores, one for each action shown. "
-                f"{'If Action 0 (REWIND) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-
-            )   
-
-
+        
         if prompt_type == 'action':
             # num_actions is the TOTAL number of actions, including Action 0 (REWIND)
             # So valid action keys are 0, 1, ..., num_actions-1
@@ -3960,7 +3632,7 @@ class ObjectNavAgent(VLMNavAgent):
                 ordering_text = (
                     f"The 'confident_score' list must contain exactly {num_actions} values. "
                     "The first value is for Action 0 (REWIND), the second value is for Action 1, "
-                    "the third for Action 2, and so on, up to the last value for "
+                    "and so on, up to the last value for "
                     f"Action {num_actions-1}."
                 )
 
@@ -3991,33 +3663,6 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-
-
-
-
-            # action_prompt = (
-            #     f"TASK: NAVIGATE TO THE NEAREST {goal.upper()}, and get as close to it as possible. "
-            #     f"Use your prior knowledge about where items are typically located within a home. "
-            #     f"There are {num_actions} actions that you can choose from. "
-            #     f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-            #     f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to TURN AROUND or DONT SEE ANY GOOD ACTIONS. '}"
-            #     f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
-            #     f"Second, tell me which general direction you should go in. "
-            #     f"Lastly, explain which action achieves that best and return it as JSON in the format: "
-            #     f"{{'action': <action_key>, 'score': <confidence_score>, 'confident_score': [<score_0>, <score_1>, ..., <score_n>]}}. "
-            #     f"'action' must be an integer not a string. "
-            #     f"Generate exactly {num_actions} scores, one for each action shown. "
-            #     f"Each s_i is an independent confidence value in [0, 1] for action i. "
-            #     f"Higher scores mean the action is more likely to bring you closer to the {goal.upper()} or otherwise more promising. "
-            #     f"Lower scores mean the action is less likely to help reach the goal, blocked, or less useful. "
-            #     f"Do NOT normalize or force the scores to sum to 1. "
-            #     f"{'If Action 0 (turn around) is available, its confidence score must appear first in the list, followed by Action 1, Action 2, etc.' if turnaround_available else 'The scores should be listed in order: Action 1, Action 2, Action 3, and so on.'}"
-            #     f"If two actions are visually/geometrically similar (e.g., small angle difference or targeting the same opening/corridor), "
-            #     f"their scores should be close (e.g., difference ≤ 0.10)."
-            # )
-
-            
-            return action_prompt
 
         raise ValueError('Prompt type must be stopping, pivot, no_project, or action')
 
