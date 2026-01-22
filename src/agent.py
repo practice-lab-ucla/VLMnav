@@ -3664,15 +3664,13 @@ class ObjectNavAgent(VLMNavAgent):
 
         return agent_action, metadata
 
-
+        
     def _construct_prompt(self, goal: str, prompt_type: str, num_actions: int=0):
         if prompt_type == 'stopping':
 
 
 
-
-
-           stopping_prompt = (
+            stopping_prompt = (
                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
                     f"The image is a fusion of three views from one position: "
                     f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
@@ -3704,10 +3702,6 @@ class ObjectNavAgent(VLMNavAgent):
                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
 
             )
-
-
-
-
 
 
 
