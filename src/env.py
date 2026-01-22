@@ -79,7 +79,7 @@ class Env:
             with open(self.worker_csv, 'w', newline='') as f:
                 w = csv.writer(f)
 
-                w.writerow(['episode_ndx', 'scene_id', 'run_result', 'steps_taken', 'distance_to_g', 'dis_true', 'real_true', 'dataset_geodesic', 'geo_start_to_goal', 'path_length_m'])
+                w.writerow(['episode_ndx', 'scene_id', 'run_result', 'steps_taken', 'distance_to_g', 'dis_true', 'real_true', 'dataset_geodesic', 'geo_start_to_goal', 'path_length_m', 'error'])
 
         # ============================
 
@@ -157,7 +157,7 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        # episode_ndx = 312
+        episode_ndx = 312
 
 
         obs = self._initialize_episode(episode_ndx)
@@ -291,6 +291,19 @@ class Env:
         # 3) Executed + rewind path length (already tracked in agent)
         path_length_m = getattr(self.agent, 'path_length_m', None)
 
+
+
+        early_error = False
+        flags = getattr(self.agent, "no_candidate_actions_by_step", None)
+        if isinstance(flags, dict):
+            early_error = bool(flags.get(0)) and bool(flags.get(1))
+
+        error_str = "Yes" if early_error else "No"
+
+
+
+
+
         with open(self.worker_csv, 'a', newline='') as f:
             csv.writer(f).writerow([
                 self.current_episode_ndx,
@@ -302,7 +315,8 @@ class Env:
                 real_true,
                 dataset_geodesic,
                 geo_start_to_goal,
-                path_length_m
+                path_length_m,
+                error_str
             ])
 
 

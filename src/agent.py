@@ -207,7 +207,7 @@ class VLMNavAgent(Agent):
 
         self.path_length_m = 0.0
 
-
+        self.no_candidate_actions_by_step = {}
 
 
         self.focal_length = calculate_focal_length(self.fov, self.resolution[1])
@@ -1556,7 +1556,7 @@ class VLMNavAgent(Agent):
 
         self.path_length_m = 0.0    
 
-
+        self.no_candidate_actions_by_step = {}
 
 
         ####################################################### initialize a csv file that saves the RRT score ###########################3
@@ -2013,6 +2013,57 @@ class VLMNavAgent(Agent):
 
 
         return a_final_projected
+    
+
+
+
+
+
+    def _fake_vlm_turnaround(self, goal, a_final: list, images: dict, step_metadata: dict, turnaround_available: bool):
+        """Fallback "fake VLM" used when no actions can be proposed.
+
+        This is triggered when the preprocessing / multi-view triplet produces
+        an empty candidate set of actions. In that case there is nothing for
+        the real VLM to rank, so we deterministically select action 0
+        ("turn around"), which is always available in the environment.
+        """
+
+        # We skip constructing a language prompt and skip the model call.
+        # Instead we directly set the metadata as if the model had answered
+        # with action 0 and a single confident action.
+        step_metadata['action_number'] = 0
+        step_metadata.setdefault('success', 1)
+        step_metadata['score'] = 1.0              # max normalized score
+        step_metadata['confident_score'] = [1.0]  # single action with prob 1
+
+        # Record a minimal log entry so that tree/backtracking code still
+        # has a consistent per-step record, even though no real VLM scores exist.
+        step_number = self.step_ndx
+        conf_scores = None   # keep this None if you don't care about per-action log entries
+        self._record_log_entry(step_number, a_final, conf_scores, turnaround_available)
+
+        logging_data = {
+            'ACTION_NUMBER': step_metadata['action_number'],
+            'CONFIDENCE_SCORE': step_metadata['score'],
+            'CONFIDENT_SCORE': step_metadata['confident_score'],
+            'PROMPT': '(fake VLM: no actions available; chose action 0 / turn around)',
+            'RESPONSE': '{"action": 0, "score": 1.0, "confident_score": [1.0]}',
+        }
+
+        return step_metadata, logging_data, logging_data['RESPONSE']
+
+
+
+
+
+
+
+
+
+
+
+
+
         
 
     def _prompting(self, goal, a_final: list, images: dict, step_metadata: dict):
@@ -3016,6 +3067,9 @@ class ObjectNavAgent(VLMNavAgent):
         if isinstance(a_final, dict):
             a_final = list(a_final.keys())
 
+        no_candidate_actions = len(a_final) == 1
+        self.no_candidate_actions_by_step[self.step_ndx] = no_candidate_actions
+
         # check if turn around is added into an option
         turnaround_available = (self.step_ndx - self.turned) >= self.cfg['turn_around_cooldown']
         turn_around_action = (0.75, np.pi)
@@ -3142,7 +3196,14 @@ class ObjectNavAgent(VLMNavAgent):
 
 
         else:
-            if self.pivot is not None:
+            if no_candidate_actions:
+                # No actions were proposed from the multi-view triplet; skip the real VLM
+                # and use the fake VLM that always chooses action 0 (turn around).
+                step_metadata, logging_data, _ = self._fake_vlm_turnaround(
+                    goal, a_final, images, step_metadata, turnaround_available
+                )
+                agent_action = self._action_number_to_polar(step_metadata['action_number'], list(a_final))
+            elif self.pivot is not None:
                 pivot_instruction = self._construct_prompt(goal, 'pivot')
                 agent_action, pivot_images = self.pivot.run(
                     obs['color_sensor'], pivot_instruction,
@@ -3325,9 +3386,6 @@ class ObjectNavAgent(VLMNavAgent):
                 f"Use your prior knowledge about where items are typically located within a home. "
                 f"There are {num_actions} actions that you can choose from. "
                 f"Actions are shown with red arrows superimposed onto your observation, labeled with numbers in white circles. "
-                f"The image is a fusion of three views from one position: "
-                f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
-                f"and a right view taken {self.multi_view_offset_deg} degrees to the right of center "
                 f"{'NOTE: If you see a white circle with number 0, it means there is an action for turn around. Choose action 0 if you want to REWIND or DONT SEE ANY GOOD ACTIONS. '}"
                 f"First, tell me what you see in your sensor observation, and if you have any leads on finding the {goal.upper()}. "
                 f"Second, tell me which general direction you should go in. "

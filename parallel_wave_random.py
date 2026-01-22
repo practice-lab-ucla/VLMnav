@@ -181,6 +181,7 @@ if __name__ == "__main__":
                             "dataset_geodesic": r.get("dataset_geodesic", ""),
                             "geo_start_to_goal": r.get("geo_start_to_goal", ""),
                             "path_length_m": r.get("path_length_m", ""),
+                            "error": r.get("error", ""),
                         })
 
             fieldnames = [
@@ -195,6 +196,7 @@ if __name__ == "__main__":
                 "dataset_geodesic",
                 "geo_start_to_goal",
                 "path_length_m",
+                "error"
             ]
 
             with combined_out.open("w", newline="", encoding="utf-8") as fp:
