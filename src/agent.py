@@ -25,7 +25,7 @@ from habitat_sim.utils.common import quat_from_coeffs
 def get_agent_heading_angle(agent_quat):
     """
     Get the heading angle (in degrees) the agent is facing in global frame.
-    The heading is measured from the X-axis in the XZ plane (e.g., 0Â° = +X, 90Â° = +Z).
+    The heading is measured from the X-axis in the XZ plane (e.g., 0 = +X, 90 = +Z).
     """
     quat_xyzw = [agent_quat.x, agent_quat.y, agent_quat.z, agent_quat.w]
     rot = R.from_quat(quat_xyzw)
@@ -621,7 +621,7 @@ class VLMNavAgent(Agent):
 ###################################################################################################################
 
 
-        print("ðŸ“Š Grid Transitions with Adjusted Scores:")
+        print("📊 Grid Transitions with Adjusted Scores:")
 
         for r1, c1, r2, c2, score in edges:
             print(f"({r1}, {c1})-({r2}, {c2}): {score}")
@@ -636,9 +636,9 @@ class VLMNavAgent(Agent):
         if self.initiate_back_propagation and self.goal_grid_location is None:
             if self.step_ndx in self.agent_grid_history:
                 self.goal_grid_location = self.agent_grid_history[self.step_ndx]
-                print(f"ðŸŽ¯ Goal grid location captured at step {self.step_ndx}: {self.goal_grid_location}")
+                print(f"🎯 Goal grid location captured at step {self.step_ndx}: {self.goal_grid_location}")
             else:
-                print("âš ï¸ Warning: Cannot capture goal grid location â€” not found in agent_grid_history.")
+                print("⚠️ Warning: Cannot capture goal grid location — not found in agent_grid_history.")
 
         # if self.first_reach and self.goal_grid_location is not None:
         if self.initiate_back_propagation:
@@ -1234,12 +1234,11 @@ class VLMNavAgent(Agent):
 
 
 
-
     def _link_parent_for_next_step(self, parent_step):
         """Record who the NEXT step's parent is (works for normal and rewind flows)."""
         child = self.step_ndx + 1
         self.parent_by_step[child] = parent_step
-        print(f"ðŸ‘ª [parent-link] next step {child} â† parent {parent_step}")
+        print(f"👪 [parent-link] next step {child} ← parent {parent_step}")
 
     def _determine_parent_step(self, step_number):
         """Pure parent lookup: never uses grid/location."""
@@ -1916,7 +1915,7 @@ class VLMNavAgent(Agent):
           - left:   yaw -multi_view_offset_deg
           - right:  yaw +multi_view_offset_deg
 
-        All three use the true camera FOV (69.5Â° from config).
+        All three use the true camera FOV (69.5 from config).
         We then horizontally concatenate them: [left | center | right].
 
         Returns a dict with:
@@ -2623,11 +2622,6 @@ class VLMNavAgent(Agent):
         Parses the response for the chosen action number and confidence scores.
         """
 
-# ############################################# extract angle ################################################
-#         print("ðŸ§­ Candidate action angles (relative to agent's heading):")
-#         for idx, (_, theta_i) in enumerate(a_final):
-#             angle_deg = np.degrees(theta_i)
-#             print(f"  Action {idx + 1}: Î¸ = {theta_i:.2f} rad / {angle_deg:.1f}Â°")
 
 
         prompt_type = 'action' if self.cfg['project'] else 'no_project'
@@ -3688,38 +3682,8 @@ class ObjectNavAgent(VLMNavAgent):
 
 
 
-            # stopping_prompt = (
-            #                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
-            #                     f"The image is a fusion of three views from one position at different angles."
-            #                     f"Your job is to decide if the agent is VERY CLOSE (less than 2 meters) from a {goal}, and you have to CLEARLY see the goal with very high confidence, based ONLY on what is VISIBLE in the image."
-            #                     f"Important: a chair is NOT a sofa, a sofa is NOT a bed, a plant MUST be inside the room. Do NOT infer the {goal} from the room type or context.\n"
 
-            #                     f"Step 1: Describe what is visible in the image and state explicitly whether a {goal} is present.\n"
-
-            #                     f"Step 2: Choose an action and output it in the format {{\"done\": <1 or 0>}}."
-            #                     f"- Return 1 ONLY if the {goal} is clearly visible and not far from it."
-            #                     f"- Return 0 if the {goal} is not visible or you are uncertain.\n"
-
-            #                     f"Step 3: Independently, rate the SCENE'S EXPLORATION POTENTIAL as a float in [0.0, 1.0], named global_semantic_score."
-            #                     f"This score MUST depend only on the current environment, NOT on whether the goal is present or visible."
-            #                     f"High scores mean the scene has open, traversable, informative paths."
-            #                     f"Low scores mean likely dead-ends, cluttered/tight spaces, blocked passages, or no promising directions.\n"
-
-            #                     f"Important rules for global_semantic_score:"
-            #                     f"- Do NOT increase the score just because the {goal} is visible."
-            #                     f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
-
-            #                     f"Examples:"
-            #                     f"0.0 to 0.1 â†’ the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-            #                     f"0.1 to 0.3 â†’ the view has no clear outlet, close to a wall, or almost blocked\n"
-            #                     f"0.3 to 0.7 â†’ the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
-            #                     f"0.7 to 1.0 â†’ the view has multiple outlets, corridors, or very large navigable space to navigate\n"
-            #                     f"After Step 3, immediately output this JSON line:"
-            #                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
-
-            # )
-
-            stopping_prompt = (
+           stopping_prompt = (
                     f"The agent has been tasked with navigating to a {goal.upper()}. The agent has sent you an image from its current location."
                     f"The image is a fusion of three views from one position: "
                     f"a center view, a left view taken {self.multi_view_offset_deg} degrees to the left of center, "
@@ -3743,10 +3707,10 @@ class ObjectNavAgent(VLMNavAgent):
                     f"- Base it on openness, navigability cues, line of sight, and apparent paths.\n"
 
                     f"Examples:"
-                    f"0.0 to 0.1 â†’ the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
-                    f"0.1 to 0.3 â†’ the view has no clear outlet, close to a wall, or almost blocked\n"
-                    f"0.3 to 0.7 â†’ the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
-                    f"0.7 to 1.0 â†’ the view has multiple outlets, corridors, or very large navigable space to navigate\n"
+                    f"0.0 to 0.1 → the view is completely blocked, directly facing a wall, with CLEARLY NO navigable path\n"
+                    f"0.1 to 0.3 → the view has no clear outlet, close to a wall, or almost blocked\n"
+                    f"0.3 to 0.7 → the view has a clear outlet or large navigable space (the higher the score, the clearer and more navigable it looks)\n"
+                    f"0.7 to 1.0 → the view has multiple outlets, corridors, or very large navigable space to navigate\n"
                     f"After Step 3, immediately output this JSON line:"
                     f"{{\"global_semantic_score\": <float 0.0 to 1.0>}}"
 
