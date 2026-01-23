@@ -2600,30 +2600,35 @@ class VLMNavAgent(Agent):
 
 
 
-
+#######################################################################
     
-        if len(out) == 0:
-            # if no explored actions or no explore bias
-            longest = max(filtered, key=lambda x: x[0])
-            longest_theta = longest[1]
-            smallest_theta = longest[1]
-            longest_ndx = filtered.index(longest)
-            out.append([min(longest[0], clip_mag), longest[1], longest[2]])
+        # if len(out) == 0:
+        #     # if no explored actions or no explore bias
+        #     longest = max(filtered, key=lambda x: x[0])
+        #     longest_theta = longest[1]
+        #     smallest_theta = longest[1]
+        #     longest_ndx = filtered.index(longest)
+        #     out.append([min(longest[0], clip_mag), longest[1], longest[2]])
             
-            for i in range(longest_ndx+1, len(filtered)):
-                if filtered[i][1] - longest_theta > min_angle:
-                    out.append([min(filtered[i][0], clip_mag), filtered[i][1], filtered[i][2]])
-                    longest_theta = filtered[i][1]
-            for i in range(longest_ndx-1, -1, -1):
-                if smallest_theta - filtered[i][1] > min_angle:
-                    out.append([min(filtered[i][0], clip_mag), filtered[i][1], filtered[i][2]])
-                    smallest_theta = filtered[i][1]
+        #     for i in range(longest_ndx+1, len(filtered)):
+        #         if filtered[i][1] - longest_theta > min_angle:
+        #             out.append([min(filtered[i][0], clip_mag), filtered[i][1], filtered[i][2]])
+        #             longest_theta = filtered[i][1]
+        #     for i in range(longest_ndx-1, -1, -1):
+        #         if smallest_theta - filtered[i][1] > min_angle:
+        #             out.append([min(filtered[i][0], clip_mag), filtered[i][1], filtered[i][2]])
+        #             smallest_theta = filtered[i][1]
 
 
 
 
-        if (out == [] or max(out, key=lambda x: x[0])[0] < self.cfg['min_action_dist']) and (self.step_ndx - self.turned) < self.cfg['turn_around_cooldown']:
-            return self._get_default_arrows()
+        # if (out == [] or max(out, key=lambda x: x[0])[0] < self.cfg['min_action_dist']) and (self.step_ndx - self.turned) < self.cfg['turn_around_cooldown']:
+        #     return self._get_default_arrows()
+        
+
+
+
+
         
         out.sort(key=lambda x: x[1])
 
