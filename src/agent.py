@@ -2255,8 +2255,8 @@ class VLMNavAgent(Agent):
             rgb_image, depth_image, agent_state, sensor_state
         )
 
-        # sensor_range = np.deg2rad(self.fov / 2) * 1.5
-        sensor_range = np.deg2rad(self.fov / 2) * 1.0
+        sensor_range = np.deg2rad(self.fov / 2) * 1.5
+        # sensor_range = np.deg2rad(self.fov / 2) * 1.0
         center_half_fov_rad = np.deg2rad(self.fov / 2.0)
 
         all_thetas = np.linspace(-sensor_range, sensor_range, self.cfg['num_theta'])
@@ -2351,7 +2351,28 @@ class VLMNavAgent(Agent):
 
             # print(f"2/3: {clip_frac}")
 
+        # ---- ADD THIS DEBUG BLOCK RIGHT AFTER THE for-loop ----
+        explored_actions = []
+        unexplored_actions = []
 
+        for mag_clip, theta, is_unexplored in arrowData:
+            # Recover original distance if you prefer that instead of clipped
+            # (since later you build original_distance_dict anyway)
+            explored_flag = not is_unexplored
+            if explored_flag:
+                explored_actions.append((mag_clip, theta))
+            else:
+                unexplored_actions.append((mag_clip, theta))
+
+        print(f"\n[DEBUG][step {self.step_ndx}] _action_proposer navigability summary:")
+        print("  Unexplored candidates (score<3 == True):")
+        for r, th in unexplored_actions:
+            print(f"    r={r:.3f} m, theta={th:.3f} rad ({np.degrees(th):.1f}°)")
+
+        print("  Explored candidates (will be deprioritized/filtered):")
+        for r, th in explored_actions:
+            print(f"    r={r:.3f} m, theta={th:.3f} rad ({np.degrees(th):.1f}°)")
+        # -------------------------------------------------------
 
         # print("Voxel map shape:", self.voxel_map.shape)
         # print("Explored map shape:", self.explored_map.shape)
