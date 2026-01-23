@@ -124,7 +124,7 @@ sim_cfg:
 env_cfg:
   num_episodes: 1
   # max_steps: 10
-  max_steps: 20
+  max_steps: 2
   log_freq: 1
   split: val
   success_threshold: 0.3 
