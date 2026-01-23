@@ -83,7 +83,7 @@ class Env:
                     'episode_ndx', 'scene_id',
                     'run_result', 'distance_to_g',
                     'dis_true', 'real_true',
-                    'bfs_min'
+                    'bfs_min', 'error'
                 ])
 
         # ============================
@@ -162,7 +162,7 @@ class Env:
         Args:
             episode_ndx (int): The index of the episode to run.
         """
-        # episode_ndx = 525
+        episode_ndx = 183
 
 
         obs = self._initialize_episode(episode_ndx)
@@ -295,10 +295,20 @@ class Env:
         if dis_true and run_result:
             real_true = True
 
+        early_error = False
+        flags = getattr(self.agent, "no_candidate_actions_by_step", None)
+        if isinstance(flags, dict):
+            early_error = bool(flags.get(0)) and bool(flags.get(1))
+
+        error_str = "Yes" if early_error else "No"
+
+        # append a row to this worker's CSV
+        scene_id = getattr(self.simWrapper, 'scene_id', '')
+
         with open(self.worker_csv, 'a', newline='') as f:
             csv.writer(f).writerow([
                 self.current_episode_ndx, scene_id, run_result,
-                distance_to_g, dis_true, real_true, bfs_min
+                distance_to_g, dis_true, real_true, bfs_min, error_str
             ])
 
 

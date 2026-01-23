@@ -52,7 +52,7 @@ agent_cfg:
   # hard_spacing: 0.3
 
 
-  num_theta: 60 # number of angles to consider as actions
+  num_theta: 150 # number of angles to consider as actions
   image_edge_threshold: 0.04 # dont project actions if they are within 4% of the image edge
 
   # turn_around_cooldown: 3 # steps before the agent can turn around again

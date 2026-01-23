@@ -9,8 +9,8 @@ import math
 import random
 
 # ========================== CONFIG ==========================
-WAVE_SIZE = 15
-NUM_WAVES = 20
+WAVE_SIZE = 20
+NUM_WAVES = 1
 MAX_STEPS = 50
 
 
@@ -150,6 +150,7 @@ if __name__ == "__main__":
                             "dis_true": r.get("dis_true", ""),
                             "real_true": r.get("real_true", ""),
                             "bfs_min": r.get("bfs_min", ""),
+                            "error": r.get("error", ""),
                         })
 
             fieldnames = [
@@ -161,6 +162,7 @@ if __name__ == "__main__":
                 "dis_true",
                 "real_true",
                 "bfs_min",
+                "error",
             ]
 
             with combined_out.open("w", newline="", encoding="utf-8") as fp:
@@ -171,6 +173,3 @@ if __name__ == "__main__":
             print(f"[combine] Wrote {combined_out}")
     except Exception as e:
         print(f"[combine] ERROR while combining worker CSVs: {e}")
-
-
-
