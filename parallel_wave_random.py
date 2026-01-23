@@ -10,7 +10,7 @@ import random
 
 # ========================== CONFIG ==========================
 WAVE_SIZE = 20
-NUM_WAVES = 1
+NUM_WAVES = 16
 MAX_STEPS = 50
 
 
