@@ -10,7 +10,7 @@ import random
 
 # ========================== CONFIG ==========================
 WAVE_SIZE = 20
-NUM_WAVES = 16
+NUM_WAVES = 15
 MAX_STEPS = 50
 
 
@@ -43,7 +43,7 @@ if TOTAL_INSTANCES_LAUNCHED > TOTAL_ENVIRONMENTS:
 valid_ids = [i for i in range(TOTAL_ENVIRONMENTS) if i not in FORBIDDEN_RANGE]
 
 # Choose random unique instance IDs from the valid pool
-RANDOM_SEED = None  # e.g. 42 for deterministic sampling
+RANDOM_SEED = 35  # e.g. 42 for deterministic sampling
 if RANDOM_SEED is not None:
     random.seed(RANDOM_SEED)
 
