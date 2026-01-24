@@ -42,7 +42,7 @@ if TOTAL_INSTANCES_LAUNCHED > TOTAL_ENVIRONMENTS:
 valid_ids = [i for i in range(TOTAL_ENVIRONMENTS) if i not in FORBIDDEN_RANGE]
 
 # Choose random unique instance IDs from the valid pool
-RANDOM_SEED = None  # e.g. 42 for deterministic sampling
+RANDOM_SEED = 42  # e.g. 42 for deterministic sampling
 if RANDOM_SEED is not None:
     random.seed(RANDOM_SEED)
 
