@@ -2523,22 +2523,25 @@ class VLMNavAgent(Agent):
                 unique[theta] = [mag]
         arrowData = []
 
-        voxel_map = getattr(self, "_voxel_map_snapshot", None)
-        explored_map = getattr(self, "_explored_map_snapshot", None)
+        # voxel_map = getattr(self, "_voxel_map_snapshot", None)
+        # explored_map = getattr(self, "_explored_map_snapshot", None)
 
-        if voxel_map is None or explored_map is None:
-            voxel_map = self.voxel_map
-            explored_map = self.explored_map
+        # if voxel_map is None or explored_map is None:
+        #     voxel_map = self.voxel_map
+        #     explored_map = self.explored_map
 
-        # voxel_map = self.voxel_map
-        # explored_map = self.explored_map
+        voxel_map = self.voxel_map
+        explored_map = self.explored_map
 
         zero_mask = np.all(voxel_map == 0, axis=-1)   # shape (H, W), True where [0,0,0]
-        num_zeros = np.count_nonzero(zero_mask)
-
         total_pixels = zero_mask.size
-        print(f"voxel_mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmap zeros: {num_zeros} / {total_pixels} "
-            f"({num_zeros / total_pixels:.3%} of pixels)")
+        grey_mask = np.all(explored_map == self.explored_color, axis=-1)
+        num_grey = np.count_nonzero(grey_mask)
+
+        print(
+            f"explored_map GREY (explored) pixels: {num_grey} / {total_pixels} "
+            f"({num_grey / total_pixels:.3%} of pixels)"
+        )
 
         topdown_map = voxel_map.copy()
         mask = np.all(explored_map == self.explored_color, axis=-1)
