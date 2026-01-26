@@ -1899,6 +1899,11 @@ class VLMNavAgent(Agent):
 
         self.voxel_map = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
         self.explored_map = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
+
+        self._voxel_map_snapshot = None
+        self._explored_map_snapshot = None
+
+
         self.stopping_calls = [-2]
         self.step_ndx = 0
         self.init_pos = None
@@ -1961,6 +1966,9 @@ class VLMNavAgent(Agent):
         self.swipping_back = False
 
         self.no_candidate_actions_by_step = {}
+
+
+ 
 
 
         ####################################################### initialize a csv file that saves the RRT score ###########################3
@@ -2188,6 +2196,10 @@ class VLMNavAgent(Agent):
 
 
         else:
+            
+            # 🔹 Snapshot voxel/explored maps from the *previous step* for scoring only
+            self._voxel_map_snapshot = self.voxel_map.copy()
+            self._explored_map_snapshot = self.explored_map.copy()
             # ---------- PASS 1: navigability + action proposer ----------
             # Order: CENTER -> LEFT -> RIGHT  (voxel map updated in this order)
             yaw_offsets = [
@@ -2511,9 +2523,32 @@ class VLMNavAgent(Agent):
                 unique[theta] = [mag]
         arrowData = []
 
-        topdown_map = self.voxel_map.copy()
-        mask = np.all(self.explored_map == self.explored_color, axis=-1)
+        voxel_map = getattr(self, "_voxel_map_snapshot", None)
+        explored_map = getattr(self, "_explored_map_snapshot", None)
+
+        if voxel_map is None or explored_map is None:
+            voxel_map = self.voxel_map
+            explored_map = self.explored_map
+
+        # voxel_map = self.voxel_map
+        # explored_map = self.explored_map
+
+        zero_mask = np.all(voxel_map == 0, axis=-1)   # shape (H, W), True where [0,0,0]
+        num_zeros = np.count_nonzero(zero_mask)
+
+        total_pixels = zero_mask.size
+        print(f"voxel_mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmap zeros: {num_zeros} / {total_pixels} "
+            f"({num_zeros / total_pixels:.3%} of pixels)")
+
+        topdown_map = voxel_map.copy()
+        mask = np.all(explored_map == self.explored_color, axis=-1)
         topdown_map[mask] = self.explored_color
+
+
+
+
+
+
         for theta, mags in unique.items():
             # Reference the map to classify actions as explored or unexplored
             mag = min(mags)
