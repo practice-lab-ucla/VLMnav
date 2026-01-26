@@ -1900,8 +1900,7 @@ class VLMNavAgent(Agent):
         self.voxel_map = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
         self.explored_map = np.zeros((self.map_size, self.map_size, 3), dtype=np.uint8)
 
-        self._voxel_map_snapshot = None
-        self._explored_map_snapshot = None
+
 
 
         self.stopping_calls = [-2]
@@ -2196,10 +2195,6 @@ class VLMNavAgent(Agent):
 
 
         else:
-            
-            # 🔹 Snapshot voxel/explored maps from the *previous step* for scoring only
-            self._voxel_map_snapshot = self.voxel_map.copy()
-            self._explored_map_snapshot = self.explored_map.copy()
             # ---------- PASS 1: navigability + action proposer ----------
             # Order: CENTER -> LEFT -> RIGHT  (voxel map updated in this order)
             yaw_offsets = [
@@ -2522,26 +2517,9 @@ class VLMNavAgent(Agent):
             else:
                 unique[theta] = [mag]
         arrowData = []
-
-        # voxel_map = getattr(self, "_voxel_map_snapshot", None)
-        # explored_map = getattr(self, "_explored_map_snapshot", None)
-
-        # if voxel_map is None or explored_map is None:
-        #     voxel_map = self.voxel_map
-        #     explored_map = self.explored_map
-
         voxel_map = self.voxel_map
         explored_map = self.explored_map
 
-        zero_mask = np.all(voxel_map == 0, axis=-1)   # shape (H, W), True where [0,0,0]
-        total_pixels = zero_mask.size
-        grey_mask = np.all(explored_map == self.explored_color, axis=-1)
-        num_grey = np.count_nonzero(grey_mask)
-
-        print(
-            f"explored_map GREY (explored) pixels: {num_grey} / {total_pixels} "
-            f"({num_grey / total_pixels:.3%} of pixels)"
-        )
 
         topdown_map = voxel_map.copy()
         mask = np.all(explored_map == self.explored_color, axis=-1)
@@ -2550,12 +2528,12 @@ class VLMNavAgent(Agent):
 
 
 
-
+        # self.e_i_scaling = 0
 
         for theta, mags in unique.items():
             # Reference the map to classify actions as explored or unexplored
             mag = min(mags)
-            cart = [self.e_i_scaling*mag*np.sin(theta), 0, -self.e_i_scaling*mag*np.cos(theta)]
+            cart = [mag*np.sin(theta), 0, -mag*np.cos(theta)]
             global_coords = local_to_global(agent_state.position, agent_state.rotation, cart)
             grid_coords = self._global_to_grid(global_coords)
             score = (sum(np.all((topdown_map[grid_coords[1]-2:grid_coords[1]+2, grid_coords[0]] == self.explored_color), axis=-1)) + 
@@ -3352,7 +3330,7 @@ class VLMNavAgent(Agent):
             text_size = 2.4 * scale_factor
             text_thickness = math.ceil(3 * scale_factor)
 
-            end_px = self._can_project(r_i, theta_i, agent_state, sensor_state)
+            end_px = self._can_project(r_i * 1.5, theta_i, agent_state, sensor_state)
             if end_px is not None:
                 action_name = action_index_offset + len(projected) + 1
                 projected[(r_i, theta_i)] = action_name

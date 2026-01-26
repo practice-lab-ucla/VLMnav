@@ -155,6 +155,7 @@ class Env:
                 self.simWrapper.reset()
 
 
+
     def _run_episode(self, episode_ndx: int):
         """
         Runs a single episode.
@@ -692,12 +693,17 @@ class ObjectNavEnv(Env):
 
 
 
-
+        def rotate_quat_about_y_xyzw(quat_xyzw, delta_degrees):
+            quat_xyzw = np.asarray(quat_xyzw, dtype=np.float32)
+            base = R.from_quat(quat_xyzw)
+            yaw = R.from_euler("y", delta_degrees, degrees=True)
+            return (yaw * base).as_quat().astype(np.float32)
 
 
 
 
 ##################################################################################################
+        rotation = rotate_quat_about_y_xyzw(episode['start_rotation'], 0.0)
         self.simWrapper.set_state(pos=self.init_pos, quat=rotation)
         self.curr_run_name = f"{episode_ndx}_{self.simWrapper.scene_id}"
 
