@@ -2540,6 +2540,14 @@ class VLMNavAgent(Agent):
                     sum(np.all(topdown_map[grid_coords[1], grid_coords[0]-2:grid_coords[0]+2] == self.explored_color, axis=-1)))
             arrowData.append([clip_frac*mag, theta, score<3])
 
+
+            is_unexplored = score < 3
+            if is_unexplored:
+                print(
+                    f"[UNEXPLORED] θ = {theta:.3f} rad "
+                    f"({np.degrees(theta):6.2f}°), r = {mag:.3f} m, score = {score}"
+                )
+
             # print(f"2/3: {clip_frac}")
 
 
@@ -3285,6 +3293,7 @@ class VLMNavAgent(Agent):
         ):
             return end_px
         return None
+        # return end_px
 
     def _project_onto_image(
         self,
@@ -3330,7 +3339,7 @@ class VLMNavAgent(Agent):
             text_size = 2.4 * scale_factor
             text_thickness = math.ceil(3 * scale_factor)
 
-            end_px = self._can_project(r_i * 1.5, theta_i, agent_state, sensor_state)
+            end_px = self._can_project(r_i, theta_i, agent_state, sensor_state)
             if end_px is not None:
                 action_name = action_index_offset + len(projected) + 1
                 projected[(r_i, theta_i)] = action_name
