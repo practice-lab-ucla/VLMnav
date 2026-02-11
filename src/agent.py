@@ -1431,20 +1431,20 @@ class VLMNavAgent(Agent):
                     continue
 
 #####################################################################################               
-                # sc = a.get("adjusted")
-                # if sc is None:
-                #     sc = a.get("score", 0.0)
-                # candidates.append((idx, float(sc)))
+                sc = a.get("adjusted")
+                if sc is None:
+                    sc = a.get("score", 0.0)
+                candidates.append((idx, float(sc)))
 
 
 #####################################################################################
-                sc = a.get("adjusted")
-                bfs_min = log.get("min_score_to_curr")
-                if bfs_min is None:
-                    bfs_min = 0.0 
+                # sc = a.get("adjusted")
+                # bfs_min = log.get("min_score_to_curr")
+                # if bfs_min is None:
+                #     bfs_min = 0.0 
 
-                new_score = 10.0 * min(sc, bfs_min) + max(sc, bfs_min)
-                candidates.append((idx, new_score))
+                # new_score = 10.0 * min(sc, bfs_min) + max(sc, bfs_min)
+                # candidates.append((idx, new_score))
 #####################################################################################
 
 
